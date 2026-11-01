@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space-diversity reflection planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#EDF0EC; --surface:#F8FAF7; --ink:#1F2B2E; --muted:#5D6B6E; --line:#CBD3CE;
+  --terrain:#CDBB92; --terrain-edge:#8A7650; --smooth:#6B5A36; --accent:#1F6F8B; --warn:#A8396A;
+  --l0:#1F6F8B; --l1:#2E8B6E; --l2:#B4791F; --l3:#A8396A; --fresnel:#7E8C8F; --direct:#3E4C50;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --bg:#151B1D; --surface:#1C2427; --ink:#E3E9E6; --muted:#9AA8A6; --line:#33403F;
+    --terrain:#5E5236; --terrain-edge:#A8946A; --smooth:#D2BE8E; --accent:#6CB4CF; --warn:#E07AA8;
+    --l0:#6CB4CF; --l1:#5CC49E; --l2:#E0A64B; --l3:#E07AA8; --fresnel:#7F8F8D; --direct:#B9C6C3;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.45 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-variant-numeric:tabular-nums}
+header{padding:20px 24px 8px}
+h1{font-size:22px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);max-width:75ch}
+.layout{display:grid;grid-template-columns:310px minmax(0,1fr);gap:20px;padding:12px 24px 32px}
+aside{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;align-self:start;position:sticky;top:12px}
+fieldset{border:0;border-bottom:1px solid var(--line);margin:0 0 12px;padding:0 0 12px}
+fieldset:last-of-type{border-bottom:0}
+legend{font-weight:600;font-size:14px;padding:0;margin-bottom:8px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{display:flex;flex-direction:column;font-size:12.5px;color:var(--muted);gap:3px}
+input,select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:5px 7px;width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ant{font-size:12.5px;color:var(--ink);margin:8px 0 4px}
+button{font:inherit;font-size:14px;border-radius:6px;padding:7px 12px;cursor:pointer;border:1px solid var(--accent);
+  background:var(--accent);color:var(--surface)}
+button.ghost{background:transparent;color:var(--accent)}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+#status{font-size:12.5px;color:var(--muted);margin-top:10px;min-height:2.6em}
+#status.err{color:var(--warn)}
+main{display:grid;gap:20px;min-width:0}
+.pair{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:20px}
+section.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+section.panel h2{font-size:16px;font-weight:600;margin:0 0 8px}
+#map{height:360px;border-radius:6px}
+canvas{width:100%;display:block}
+#profile{height:360px}
+#spectrum{height:340px}
+.summary{font-size:13px;color:var(--muted);margin-top:8px}
+.summary b{color:var(--ink);font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:18px;height:3px;border-radius:2px;display:inline-block}
+.scan{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:10px}
+.scan label{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:13.5px}
+.scan input[type=range]{width:240px;padding:0}
+#phaseVal{min-width:3.5em;display:inline-block}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
+th{font-weight:500;color:var(--muted);vertical-align:bottom}
+th:first-child,td:first-child{text-align:left}
+td.cls{text-align:left;font-weight:500}
+.notes{font-size:13px;color:var(--muted);max-width:90ch}
+.notes li{margin:3px 0}
+@media (max-width:1100px){.pair{grid-template-columns:1fr}}
+@media (max-width:820px){.layout{grid-template-columns:1fr;padding:12px}aside{position:static}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Space-diversity reflection planner</h1>
+  <p>Finds the ground-reflection point for every main/diversity antenna pair, its delay and level relative to the direct path, and shows whether the resulting fade is flat or frequency-selective across your channel.</p>
+</header>
+
+<div class="layout">
+<aside>
+  <fieldset>
+    <legend>Site A (local)</legend>
+    <div class="row">
+      <label>Latitude<input id="aLat" type="number" step="0.0001" value="52.0000"></label>
+      <label>Longitude<input id="aLon" type="number" step="0.0001" value="5.0000"></label>
+    </div>
+    <div class="ant">Main antenna</div>
+    <div class="row">
+      <label>Height above ground (m)<input id="aHm" type="number" step="0.5" value="30"></label>
+      <label>Dish diameter (m)<input id="aDm" type="number" step="0.1" value="1.8"></label>
+    </div>
+    <div class="ant">Diversity antenna</div>
+    <div class="row">
+      <label>Height above ground (m)<input id="aHd" type="number" step="0.5" value="18"></label>
+      <label>Dish diameter (m)<input id="aDd" type="number" step="0.1" value="1.8"></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Site B (remote)</legend>
+    <div class="row">
+      <label>Latitude<input id="bLat" type="number" step="0.0001" value="52.3000"></label>
+      <label>Longitude<input id="bLon" type="number" step="0.0001" value="5.3500"></label>
+    </div>
+    <div class="ant">Main antenna</div>
+    <div class="row">
+      <label>Height above ground (m)<input id="bHm" type="number" step="0.5" value="30"></label>
+      <label>Dish diameter (m)<input id="bDm" type="number" step="0.1" value="1.8"></label>
+    </div>
+    <div class="ant">Diversity antenna</div>
+    <div class="row">
+      <label>Height above ground (m)<input id="bHd" type="number" step="0.5" value="18"></label>
+      <label>Dish diameter (m)<input id="bDd" type="number" step="0.1" value="1.8"></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Radio and propagation</legend>
+    <div class="row">
+      <label>Frequency (GHz)<input id="freq" type="number" step="0.05" value="6"></label>
+      <label>Channel BW (MHz)<input id="bw" type="number" step="1" value="80"></label>
+      <label>Symbol rate (Mbaud)<input id="rs" type="number" step="1" value="75"></label>
+      <label>k-factor<input id="kf" type="number" step="0.01" value="1.33"></label>
+      <label>Reflection loss (dB)<input id="rloss" type="number" step="0.5" value="0"></label>
+      <label>Surface smoothing (m)<input id="smooth" type="number" step="50" value="300"></label>
+    </div>
+    <label style="margin-top:8px">Terrain tile zoom
+      <select id="zoom">
+        <option value="11">11 (about 75 m/pixel)</option>
+        <option value="12" selected>12 (about 38 m/pixel)</option>
+        <option value="13">13 (about 19 m/pixel)</option>
+        <option value="14">14 (about 10 m/pixel)</option>
+      </select>
+    </label>
+  </fieldset>
+  <div class="btns">
+    <button id="btnLoad">Load terrain and calculate</button>
+    <button id="btnFlat" class="ghost">Use flat ground</button>
+  </div>
+  <div id="status">Set both sites, then load terrain. You can also drag the A and B markers on the map.</div>
+</aside>
+
+<main>
+  <div class="pair">
+    <section class="panel">
+      <h2>Path</h2>
+      <div id="map"></div>
+    </section>
+    <section class="panel">
+      <h2>Elevation profile (effective earth, k-factor applied)</h2>
+      <canvas id="profile"></canvas>
+      <div class="legend" id="profLegend"></div>
+      <div class="summary" id="profSummary"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Received spectrum: direct plus reflected path</h2>
+    <div class="scan">
+      <label>Extra reflection phase
+        <input id="phase" type="range" min="0" max="360" step="1" value="0">
+        <span id="phaseVal">0°</span>
+      </label>
+      <button id="btnScan" class="ghost">Scan phase</button>
+      <button id="btnNominal" class="ghost">Back to nominal (0°)</button>
+      <label>Show SD combining for
+        <select id="combo" style="width:auto">
+          <option value="Am">Tx from A main</option>
+          <option value="Ad">Tx from A diversity</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+    </div>
+    <canvas id="spectrum"></canvas>
+    <div class="legend" id="specLegend"></div>
+    <div class="summary">At 0° the reflected ray has its geometric phase plus a 180° ground reflection. The slider adds the same extra phase to all four links, which mimics small changes in refractivity or reflection-point position. The shaded area is the channel bandwidth. The combined curve is ideal maximum-ratio combining of the two receive antennas at site B.</div>
+  </section>
+
+  <section class="panel">
+    <h2>Reflection geometry per link</h2>
+    <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>Link</th><th>Reflection point<br>from A (km)</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
+        <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at A<br>(°)</th><th>Off-axis at B<br>(°)</th>
+        <th>Antenna<br>discrimination (dB)</th><th>Reflected level<br>vs direct (dB)</th><th>Nominal<br>phase (°)</th>
+        <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="14" style="text-align:left;color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
+    </table>
+    </div>
+    <div class="summary" id="skew"></div>
+  </section>
+
+  <section class="panel notes">
+    <h2 style="color:var(--ink)">Method and assumptions</h2>
+    <ul>
+      <li>Terrain comes from AWS Terrarium elevation tiles (SRTM-based). If those cannot be read, the page falls back to the Open-Meteo elevation API, and then to flat ground.</li>
+      <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines.</li>
+      <li>The reflection point is the point on the smoothed terrain that minimises the path length antenna → ground → antenna (Fermat’s principle), with both legs clear of the unsmoothed terrain. Rough or hilly terrain can have several specular points; the tool reports the strongest-geometry one.</li>
+      <li>Every antenna is aimed at the far-end main antenna. Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
+      <li>Ground reflection is total (0 dB plus the optional extra loss) with a 180° phase reversal. Divergence from earth curvature and surface roughness are not included, so the reflected level is a worst case.</li>
+      <li>Behaviour uses the delay × bandwidth product: below 0.05 the fade is flat across the channel, 0.05–0.3 gives a tilt or slope, and above 0.3 a notch can sit inside the band.</li>
+    </ul>
+  </section>
+</main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+"use strict";
+const C = 299792458, rad = Math.PI / 180, R0 = 6371008.8;
+const $ = id => document.getElementById(id);
+const LINKS = [
+  { key: 'MM', a: 'Am', b: 'Bm', name: 'A main → B main', col: '--l0' },
+  { key: 'MD', a: 'Am', b: 'Bd', name: 'A main → B div',  col: '--l1' },
+  { key: 'DM', a: 'Ad', b: 'Bm', name: 'A div → B main',  col: '--l2' },
+  { key: 'DD', a: 'Ad', b: 'Bd', name: 'A div → B div',   col: '--l3' },
+];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const num = id => parseFloat($(id).value);
+
+function params() {
+  return {
+    A: { lat: num('aLat'), lon: num('aLon'), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd') },
+    B: { lat: num('bLat'), lon: num('bLon'), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd') },
+    f: num('freq') * 1e9, bw: num('bw') * 1e6, rs: num('rs') * 1e6, k: num('kf'),
+    rl: num('rloss') || 0, sm: Math.max(0, num('smooth') || 0), z: parseInt($('zoom').value, 10)
+  };
+}
+function status(msg, err = false) { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
+
+/* ---------- geodesy ---------- */
+function gcDist(a, b) {
+  const p1 = a.lat * rad, p2 = b.lat * rad, dp = p2 - p1, dl = (b.lon - a.lon) * rad;
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R0 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function gcInterp(a, b, t) {
+  const d = gcDist(a, b) / R0; if (d < 1e-12) return { lat: a.lat, lon: a.lon };
+  const p1 = a.lat * rad, l1 = a.lon * rad, p2 = b.lat * rad, l2 = b.lon * rad;
+  const A = Math.sin((1 - t) * d) / Math.sin(d), B = Math.sin(t * d) / Math.sin(d);
+  const x = A * Math.cos(p1) * Math.cos(l1) + B * Math.cos(p2) * Math.cos(l2);
+  const y = A * Math.cos(p1) * Math.sin(l1) + B * Math.cos(p2) * Math.sin(l2);
+  const z = A * Math.sin(p1) + B * Math.sin(p2);
+  return { lat: Math.atan2(z, Math.hypot(x, y)) / rad, lon: Math.atan2(y, x) / rad };
+}
+
+/* ---------- terrain ---------- */
+const tileCache = new Map();
+function loadTile(z, x, y) {
+  const key = `${z}/${x}/${y}`;
+  if (tileCache.has(key)) return tileCache.get(key);
+  const p = new Promise((res, rej) => {
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+        const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+        res(g.getImageData(0, 0, 256, 256).data);
+      } catch (e) { rej(e); }
+    };
+    img.onerror = () => rej(new Error('Tile ' + key + ' failed'));
+    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${key}.png`;
+  });
+  tileCache.set(key, p); p.catch(() => tileCache.delete(key));
+  return p;
+}
+async function terrariumElev(pts, z) {
+  const n = 2 ** z;
+  const gp = pts.map(p => {
+    const gx = (p.lon + 180) / 360 * n * 256;
+    const r = p.lat * rad;
+    const gy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n * 256;
+    return [gx - 0.5, gy - 0.5];
+  });
+  const need = new Set();
+  for (const [gx, gy] of gp) for (const dx of [0, 1]) for (const dy of [0, 1])
+    need.add(`${Math.floor((Math.floor(gx) + dx) / 256)}/${Math.floor((Math.floor(gy) + dy) / 256)}`);
+  const tiles = {}; let done = 0;
+  await Promise.all([...need].map(async k => {
+    const [x, y] = k.split('/').map(Number);
+    tiles[k] = await loadTile(z, ((x % n) + n) % n, y);
+    status(`Loading terrain tiles ${++done} of ${need.size}…`);
+  }));
+  const pix = (px, py) => {
+    const tx = Math.floor(px / 256), ty = Math.floor(py / 256);
+    const d = tiles[`${tx}/${ty}`]; const i = ((py - ty * 256) * 256 + (px - tx * 256)) * 4;
+    return d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768;
+  };
+  return gp.map(([gx, gy]) => {
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
+    return pix(x0, y0) * (1 - fx) * (1 - fy) + pix(x0 + 1, y0) * fx * (1 - fy)
+         + pix(x0, y0 + 1) * (1 - fx) * fy + pix(x0 + 1, y0 + 1) * fx * fy;
+  });
+}
+async function openMeteoElev(pts) {
+  const out = [];
+  for (let i = 0; i < pts.length; i += 100) {
+    const s = pts.slice(i, i + 100);
+    const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + s.map(p => p.lat.toFixed(5)).join(',')
+      + '&longitude=' + s.map(p => p.lon.toFixed(5)).join(',');
+    const r = await fetch(url); if (!r.ok) throw new Error('Open-Meteo HTTP ' + r.status);
+    const j = await r.json(); out.push(...j.elevation);
+    status(`Loading elevation points ${Math.min(i + 100, pts.length)} of ${pts.length}…`);
+  }
+  return out;
+}
+
+let profile = null, results = null;
+async function loadTerrain(flat = false) {
+  const p = params();
+  if ([p.A.lat, p.A.lon, p.B.lat, p.B.lon].some(isNaN)) { status('Enter valid coordinates for both sites.', true); return; }
+  const d = gcDist(p.A, p.B);
+  if (d < 500) { status('The sites are less than 500 m apart. Move one of them.', true); return; }
+  updateMapSites(p);
+  let N = Math.min(1500, Math.max(300, Math.round(d / 30)));
+  let pts = Array.from({ length: N }, (_, i) => gcInterp(p.A, p.B, i / (N - 1)));
+  let elev, src;
+  if (flat) { elev = pts.map(() => 0); src = 'flat ground at sea level'; }
+  else {
+    try { status('Loading terrain tiles…'); elev = await terrariumElev(pts, p.z); src = `Terrarium tiles, zoom ${p.z}`; }
+    catch (e1) {
+      try {
+        N = Math.min(N, 500); pts = Array.from({ length: N }, (_, i) => gcInterp(p.A, p.B, i / (N - 1)));
+        status('Terrain tiles unavailable, trying Open-Meteo…'); elev = await openMeteoElev(pts); src = 'Open-Meteo elevation API (90 m DEM)';
+      } catch (e2) {
+        elev = pts.map(() => 0); src = 'flat ground (terrain download failed)';
+        status('Terrain download failed, so flat ground is used. Opening the page from a local web server usually fixes this.', true);
+      }
+    }
+  }
+  profile = { d, N, pts, xs: pts.map((_, i) => d * i / (N - 1)), elev, src };
+  compute();
+  if (!src.startsWith('flat ground (')) status(`Path ${(d / 1000).toFixed(2)} km, ${N} profile points from ${src}.`);
+}
+
+/* ---------- antenna pattern: ITU-R F.699 envelope ---------- */
+function discrimination(D, lam, phi) {
+  const r = D / lam;
+  const Gmax = 10 * Math.log10(0.6 * (Math.PI * r) ** 2);
+  const G1 = 2 + 15 * Math.log10(r);
+  const phim = 20 / r * Math.sqrt(Math.max(Gmax - G1, 0));
+  let G;
+  if (phi < phim) G = Gmax - 2.5e-3 * (r * phi) ** 2;
+  else if (r > 100) {
+    const phir = 15.85 * r ** -0.6;
+    G = phi < Math.max(phim, phir) ? G1 : (phi < 48 ? 32 - 25 * Math.log10(phi) : -10);
+  } else {
+    G = phi < 100 / r ? G1 : (phi < 48 ? 52 - 10 * Math.log10(r) - 25 * Math.log10(phi) : 10 - 10 * Math.log10(r));
+  }
+  return Math.max(0, Gmax - Math.min(G, Gmax));
+}
+const angBetween = (u, v) => Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])) / rad;
+
+/* ---------- core calculation ---------- */
+function compute() {
+  if (!profile) return;
+  const p = params(); const { d, N, xs, elev } = profile;
+  const Re = p.k * 6371e3, lam = C / p.f, dx = d / (N - 1);
+  const yT = xs.map((x, i) => elev[i] + x * (d - x) / (2 * Re));
+  const hw = Math.max(1, Math.round(p.sm / dx / 2));
+  const pre = [0]; for (let i = 0; i < N; i++) pre.push(pre[i] + yT[i]);
+  const yS = yT.map((_, i) => { const a = Math.max(0, i - hw), b = Math.min(N - 1, i + hw); return (pre[b + 1] - pre[a]) / (b - a + 1); });
+
+  const ant = {
+    Am: { x: 0, y: elev[0] + p.A.hm, D: p.A.Dm }, Ad: { x: 0, y: elev[0] + p.A.hd, D: p.A.Dd },
+    Bm: { x: d, y: elev[N - 1] + p.B.hm, D: p.B.Dm }, Bd: { x: d, y: elev[N - 1] + p.B.hd, D: p.B.Dd },
+  };
+
+  const visible = (ax, ay, c) => {     // ray from antenna (ax,ay) to reflection sample c clears terrain
+    const px = xs[c], py = yS[c];
+    const lo = Math.min(ax, px), hi = Math.max(ax, px);
+    for (let j = 1; j < N - 1; j++) {
+      if (j === c || xs[j] <= lo || xs[j] >= hi) continue;
+      const ly = ay + (py - ay) * (xs[j] - ax) / (px - ax);
+      const g = Math.abs(j - c) <= hw ? yS[j] : yT[j];
+      if (ly < g - 0.5) return false;
+    }
+    return true;
+  };
+
+  const links = LINKS.map(L => {
+    const a = ant[L.a], b = ant[L.b];
+    const Ld = Math.hypot(b.x - a.x, b.y - a.y);
+    const Lp = new Float64Array(N);
+    for (let i = 0; i < N; i++) Lp[i] = Math.hypot(xs[i] - a.x, yS[i] - a.y) + Math.hypot(b.x - xs[i], b.y - yS[i]);
+    const cands = [];
+    for (let i = 1; i < N - 1; i++) if (Lp[i] <= Lp[i - 1] && Lp[i] <= Lp[i + 1]) cands.push(i);
+    cands.sort((i, j) => Lp[i] - Lp[j]);
+    let c = -1;
+    for (const i of cands.slice(0, 200)) if (visible(a.x, a.y, i) && visible(b.x, b.y, i)) { c = i; break; }
+    const out = { ...L, Ld, ok: c >= 0 };
+    if (c < 0) return out;
+    const P = { x: xs[c], y: yS[c] };
+    const Lr = Lp[c], tau = (Lr - Ld) / C;
+    const s = (yS[Math.min(c + 1, N - 1)] - yS[Math.max(c - 1, 0)]) / (xs[Math.min(c + 1, N - 1)] - xs[Math.max(c - 1, 0)]);
+    const g1 = angBetween([a.x - P.x, a.y - P.y], [-1, -s]), g2 = angBetween([b.x - P.x, b.y - P.y], [1, s]);
+    const aimA = [ant.Bm.x - a.x, ant.Bm.y - a.y], aimB = [ant.Am.x - b.x, ant.Am.y - b.y];
+    const offDirA = angBetween(aimA, [b.x - a.x, b.y - a.y]), offRefA = angBetween(aimA, [P.x - a.x, P.y - a.y]);
+    const offDirB = angBetween(aimB, [a.x - b.x, a.y - b.y]), offRefB = angBetween(aimB, [P.x - b.x, P.y - b.y]);
+    const disc = discrimination(a.D, lam, offRefA) + discrimination(b.D, lam, offRefB)
+               - discrimination(a.D, lam, offDirA) - discrimination(b.D, lam, offDirB);
+    const rhoDb = disc + p.rl + 20 * Math.log10(Lr / Ld);
+    const phase0 = (((Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    Object.assign(out, { c, P, Lr, tau, graze: (g1 + g2) / 2, offRefA, offRefB, disc, rhoDb, rho: 10 ** (-rhoDb / 20), phase0 });
+    let worst = 0;
+    for (let k = 0; k < 72; k++) { const r = ripple(out, k * 5 * rad, p); worst = Math.max(worst, r.max - r.min); }
+    out.worst = worst;
+    return out;
+  });
+
+  // direct-path clearance of A main -> B main
+  let worstCl = Infinity, worstX = 0;
+  const a = ant.Am, b = ant.Bm;
+  for (let i = 1; i < N - 1; i++) {
+    const ly = a.y + (b.y - a.y) * xs[i] / d, F1 = Math.sqrt(lam * xs[i] * (d - xs[i]) / d);
+    const cl = (ly - yT[i]) / F1; if (cl < worstCl) { worstCl = cl; worstX = xs[i]; }
+  }
+  results = { p, d, N, xs, yT, yS, ant, links, lam, worstCl, worstX };
+  drawProfile(); drawTable(); drawSpectrum(); updateMapRefl();
+}
+
+function H2(l, f, phiS, p) { // |H|^2 at baseband offset f
+  const th = phiS + l.phase0 - 2 * Math.PI * f * l.tau;
+  return 1 + l.rho * l.rho + 2 * l.rho * Math.cos(th);
+}
+function ripple(l, phiS, p) {
+  let mn = Infinity, mx = -Infinity;
+  for (let k = 0; k <= 60; k++) {
+    const f = -p.bw / 2 + p.bw * k / 60;
+    const v = 10 * Math.log10(Math.max(H2(l, f, phiS, p), 1e-6));
+    mn = Math.min(mn, v); mx = Math.max(mx, v);
+  }
+  return { min: mn, max: mx };
+}
+function behaviour(l, p) {
+  if (!l.ok) return 'No visible reflection';
+  if (l.rhoDb > 25) return 'Reflection negligible';
+  const x = l.tau * p.bw;
+  if (x < 0.05) return 'Flat fade';
+  if (x < 0.3) return 'Flat with slope';
+  return 'Frequency-selective';
+}
+
+/* ---------- canvas helpers ---------- */
+function setup(cv) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { g, w: r.width, h: r.height };
+}
+function niceStep(range, n) {
+  const raw = range / n, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
+  return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
+}
+function axes(g, box, x0, x1, y0, y1, xl, yl) {
+  g.strokeStyle = css('--line'); g.fillStyle = css('--muted'); g.lineWidth = 1;
+  g.font = '12px "IBM Plex Sans", system-ui, sans-serif';
+  const X = v => box.l + (v - x0) / (x1 - x0) * (box.r - box.l), Y = v => box.b - (v - y0) / (y1 - y0) * (box.b - box.t);
+  const sx = niceStep(x1 - x0, 8), sy = niceStep(y1 - y0, 6);
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let v = Math.ceil(x0 / sx) * sx; v <= x1 + 1e-9; v += sx) {
+    g.beginPath(); g.moveTo(X(v), box.t); g.lineTo(X(v), box.b); g.globalAlpha = .5; g.stroke(); g.globalAlpha = 1;
+    g.fillText(+v.toFixed(6) + '', X(v), box.b + 4);
+  }
+  g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (let v = Math.ceil(y0 / sy) * sy; v <= y1 + 1e-9; v += sy) {
+    g.beginPath(); g.moveTo(box.l, Y(v)); g.lineTo(box.r, Y(v)); g.globalAlpha = .5; g.stroke(); g.globalAlpha = 1;
+    g.fillText(+v.toFixed(6) + '', box.l - 6, Y(v));
+  }
+  g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillText(xl, (box.l + box.r) / 2, box.b + 34);
+  g.save(); g.translate(14, (box.t + box.b) / 2); g.rotate(-Math.PI / 2); g.textBaseline = 'middle'; g.fillText(yl, 0, 0); g.restore();
+  return { X, Y };
+}
+
+/* ---------- profile ---------- */
+function drawProfile() {
+  const cv = $('profile'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
+  if (!results) return;
+  const { d, xs, yT, yS, ant, links, lam } = results;
+  const box = { l: 56, r: w - 12, t: 12, b: h - 40 };
+  let ymin = Math.min(...yT), ymax = Math.max(...yT, ant.Am.y, ant.Bm.y, ant.Ad.y, ant.Bd.y);
+  const pad = (ymax - ymin) * 0.08 + 5; ymin -= pad; ymax += pad;
+  const { X, Y } = axes(g, box, 0, d / 1000, ymin, ymax, 'Distance from A (km)', 'Height (m)');
+  const Xm = x => X(x / 1000);
+  // terrain
+  g.beginPath(); g.moveTo(Xm(0), Y(ymin));
+  xs.forEach((x, i) => g.lineTo(Xm(x), Y(yT[i]))); g.lineTo(Xm(d), Y(ymin)); g.closePath();
+  g.fillStyle = css('--terrain'); g.fill(); g.strokeStyle = css('--terrain-edge'); g.lineWidth = 1; g.stroke();
+  g.beginPath(); xs.forEach((x, i) => i ? g.lineTo(Xm(x), Y(yS[i])) : g.moveTo(Xm(x), Y(yS[i])));
+  g.strokeStyle = css('--smooth'); g.setLineDash([4, 3]); g.stroke(); g.setLineDash([]);
+  // Fresnel zone of main-main
+  const a = ant.Am, b = ant.Bm;
+  g.strokeStyle = css('--fresnel'); g.setLineDash([2, 4]); g.lineWidth = 1;
+  for (const sgn of [1, -1]) {
+    g.beginPath();
+    xs.forEach((x, i) => { const ly = a.y + (b.y - a.y) * x / d, r = Math.sqrt(lam * x * (d - x) / d); const yy = Y(ly + sgn * r); i ? g.lineTo(Xm(x), yy) : g.moveTo(Xm(x), yy); });
+    g.stroke();
+  }
+  g.setLineDash([]);
+  // direct paths
+  g.strokeStyle = css('--direct');
+  for (const L of LINKS) { const A = ant[L.a], B = ant[L.b]; g.lineWidth = L.key === 'MM' ? 1.6 : 0.8; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke(); }
+  // reflected rays
+  for (const l of links) {
+    if (!l.ok) continue; const A = ant[l.a], B = ant[l.b];
+    g.strokeStyle = css(l.col); g.lineWidth = 1.6;
+    g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(l.P.x), Y(l.P.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke();
+    g.fillStyle = css(l.col); g.beginPath(); g.arc(Xm(l.P.x), Y(l.P.y), 4, 0, 2 * Math.PI); g.fill();
+  }
+  // masts
+  g.strokeStyle = css('--ink'); g.fillStyle = css('--ink'); g.lineWidth = 2;
+  for (const [x, y0, tops] of [[0, yT[0], [ant.Am, ant.Ad]], [d, yT[yT.length - 1], [ant.Bm, ant.Bd]]]) {
+    g.beginPath(); g.moveTo(Xm(x), Y(y0)); g.lineTo(Xm(x), Y(Math.max(...tops.map(t => t.y)))); g.stroke();
+    for (const t of tops) { g.beginPath(); g.arc(Xm(x), Y(t.y), 3.5, 0, 2 * Math.PI); g.fill(); }
+  }
+  $('profLegend').innerHTML = links.map(l => `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}${l.ok ? '' : ' (none)'}</span>`).join('')
+    + `<span><i class="sw" style="background:${css('--fresnel')}"></i>1st Fresnel zone, main to main</span>`;
+  $('profSummary').innerHTML = `Path <b>${(d / 1000).toFixed(2)} km</b>, terrain from ${profile.src}. Worst clearance of A main → B main is <b>${results.worstCl.toFixed(2)} × F1</b> at ${(results.worstX / 1000).toFixed(1)} km`
+    + (results.worstCl < 0.6 ? ' (below the usual 0.6 × F1 criterion).' : '.');
+}
+
+/* ---------- spectrum ---------- */
+let phiS = 0;
+function drawSpectrum() {
+  const cv = $('spectrum'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
+  if (!results) return;
+  const { p, links } = results;
+  const f0 = -0.75 * p.bw, f1 = 0.75 * p.bw, ymin = -40, ymax = 8;
+  const box = { l: 56, r: w - 12, t: 12, b: h - 40 };
+  // band shading
+  const Xs = f => box.l + (f - f0) / (f1 - f0) * (box.r - box.l);
+  g.fillStyle = css('--accent'); g.globalAlpha = .08; g.fillRect(Xs(-p.bw / 2), box.t, Xs(p.bw / 2) - Xs(-p.bw / 2), box.b - box.t); g.globalAlpha = 1;
+  const { X, Y } = axes(g, box, f0 / 1e6, f1 / 1e6, ymin, ymax, 'Offset from carrier (MHz)', 'Relative level (dB)');
+  const n = 400, fv = Array.from({ length: n + 1 }, (_, k) => f0 + (f1 - f0) * k / n);
+  const clampY = v => Y(Math.max(ymin, Math.min(ymax, v)));
+  g.save(); g.beginPath(); g.rect(box.l, box.t, box.r - box.l, box.b - box.t); g.clip();
+  for (const l of links) {
+    if (!l.ok) continue;
+    g.strokeStyle = css(l.col); g.lineWidth = 1.6; g.beginPath();
+    fv.forEach((f, k) => { const v = 10 * Math.log10(Math.max(H2(l, f, phiS, p), 1e-6)); k ? g.lineTo(X(f / 1e6), clampY(v)) : g.moveTo(X(f / 1e6), clampY(v)); });
+    g.stroke();
+  }
+  const combo = $('combo').value; let comboTxt = '';
+  if (combo !== 'off') {
+    const pair = links.filter(l => l.a === combo);
+    g.strokeStyle = css('--ink'); g.lineWidth = 2.4; g.setLineDash([7, 4]); g.beginPath();
+    fv.forEach((f, k) => {
+      const s = pair.reduce((acc, l) => acc + (l.ok ? H2(l, f, phiS, p) : 1), 0) / pair.length;
+      const v = 10 * Math.log10(Math.max(s, 1e-6)); k ? g.lineTo(X(f / 1e6), clampY(v)) : g.moveTo(X(f / 1e6), clampY(v));
+    });
+    g.stroke(); g.setLineDash([]);
+    comboTxt = `<span><i class="sw" style="background:${css('--ink')}"></i>SD combined at B, Tx from A ${combo === 'Am' ? 'main' : 'diversity'}</span>`;
+  }
+  g.restore();
+  $('specLegend').innerHTML = links.map(l => {
+    if (!l.ok) return `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}: no reflection</span>`;
+    const r = ripple(l, phiS, p);
+    return `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}: ${r.min.toFixed(1)} to ${r.max.toFixed(1)} dB in band</span>`;
+  }).join('') + comboTxt;
+  updateRippleCells();
+}
+
+/* ---------- table ---------- */
+function drawTable() {
+  const { p, links, ant } = results; const T = 1 / p.rs;
+  $('tbody').innerHTML = links.map(l => {
+    const sw = `<i class="sw" style="background:${css(l.col)};margin-right:6px"></i>`;
+    if (!l.ok) return `<tr><td>${sw}${l.name}</td><td colspan="12" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
+    return `<tr><td>${sw}${l.name}</td><td>${(l.P.x / 1000).toFixed(2)}</td><td>${l.graze.toFixed(3)}</td><td>${(l.Lr - l.Ld).toFixed(3)}</td>
+      <td>${(l.tau * 1e9).toFixed(3)}</td><td>${(l.tau / T).toFixed(3)}</td><td>${l.offRefA.toFixed(3)}</td><td>${l.offRefB.toFixed(3)}</td>
+      <td>${l.disc.toFixed(1)}</td><td>${(-l.rhoDb).toFixed(1)}</td><td>${(l.phase0 / rad).toFixed(0)}</td>
+      <td>${(1 / l.tau / 1e6).toFixed(0)}</td><td id="rip-${l.key}"></td><td class="cls">${behaviour(l, p)}</td></tr>`;
+  }).join('');
+  const dMM = Math.hypot(ant.Bm.x - ant.Am.x, ant.Bm.y - ant.Am.y), dMD = Math.hypot(ant.Bd.x - ant.Am.x, ant.Bd.y - ant.Am.y);
+  $('skew').innerHTML = `Direct-path delay difference between A main → B main and A main → B div: <b>${((dMD - dMM) / C * 1e12).toFixed(1)} ps</b>. The feeder skew from your SD cable is added on top of this and is normally far larger.`;
+  updateRippleCells();
+}
+function updateRippleCells() {
+  if (!results) return;
+  for (const l of results.links) {
+    const td = document.getElementById('rip-' + l.key); if (!td || !l.ok) continue;
+    const r = ripple(l, phiS, results.p);
+    td.textContent = `${(r.max - r.min).toFixed(1)} / ${Math.min(l.worst, 60).toFixed(1)}`;
+  }
+}
+
+/* ---------- map ---------- */
+const map = L.map('map', { zoomControl: true });
+const layers = {
+  'Topographic': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Tiles © Esri' }),
+  'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Tiles © Esri' }),
+  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }),
+};
+layers['Topographic'].addTo(map); L.control.layers(layers).addTo(map);
+const icon = t => L.divIcon({ className: '', html: `<div style="width:26px;height:26px;border-radius:50%;background:${css('--accent')};color:${css('--surface')};display:grid;place-items:center;font:600 13px 'IBM Plex Sans',sans-serif;border:2px solid ${css('--surface')}">${t}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+const mA = L.marker([0, 0], { draggable: true, icon: icon('A') }).addTo(map);
+const mB = L.marker([0, 0], { draggable: true, icon: icon('B') }).addTo(map);
+const pathLine = L.polyline([], { color: css('--accent'), weight: 2 }).addTo(map);
+let reflMarkers = [];
+function updateMapSites(p, fit = true) {
+  mA.setLatLng([p.A.lat, p.A.lon]); mB.setLatLng([p.B.lat, p.B.lon]);
+  pathLine.setLatLngs([[p.A.lat, p.A.lon], [p.B.lat, p.B.lon]]);
+  if (fit) map.fitBounds(pathLine.getBounds(), { padding: [30, 30] });
+}
+function updateMapRefl() {
+  reflMarkers.forEach(m => m.remove()); reflMarkers = [];
+  for (const l of results.links) {
+    if (!l.ok) continue; const pt = profile.pts[l.c];
+    reflMarkers.push(L.circleMarker([pt.lat, pt.lon], { radius: 6, color: css(l.col), fillColor: css(l.col), fillOpacity: .9, weight: 1 })
+      .bindTooltip(`${l.name}: ${(l.P.x / 1000).toFixed(2)} km from A`).addTo(map));
+  }
+}
+let reloadTimer = null;
+function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => loadTerrain(false), 400); }
+mA.on('dragend', e => { const ll = e.target.getLatLng(); $('aLat').value = ll.lat.toFixed(5); $('aLon').value = ll.lng.toFixed(5); scheduleReload(); });
+mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = ll.lat.toFixed(5); $('bLon').value = ll.lng.toFixed(5); scheduleReload(); });
+
+/* ---------- events ---------- */
+['aLat', 'aLon', 'bLat', 'bLon', 'zoom'].forEach(id => $(id).addEventListener('change', () => { updateMapSites(params()); scheduleReload(); }));
+['aHm', 'aDm', 'aHd', 'aDd', 'bHm', 'bDm', 'bHd', 'bDd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
+  .forEach(id => $(id).addEventListener('input', () => compute()));
+$('btnLoad').addEventListener('click', () => loadTerrain(false));
+$('btnFlat').addEventListener('click', () => loadTerrain(true));
+$('phase').addEventListener('input', e => { phiS = +e.target.value * rad; $('phaseVal').textContent = e.target.value + '°'; drawSpectrum(); });
+$('combo').addEventListener('change', drawSpectrum);
+$('btnNominal').addEventListener('click', () => { stopScan(); $('phase').value = 0; phiS = 0; $('phaseVal').textContent = '0°'; drawSpectrum(); });
+let scanning = false;
+function stopScan() { scanning = false; $('btnScan').textContent = 'Scan phase'; }
+$('btnScan').addEventListener('click', () => {
+  if (scanning) { stopScan(); return; }
+  scanning = true; $('btnScan').textContent = 'Stop scan';
+  const step = () => {
+    if (!scanning) return;
+    const v = (+$('phase').value + 2) % 360; $('phase').value = v; phiS = v * rad; $('phaseVal').textContent = v + '°';
+    drawSpectrum(); requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+});
+window.addEventListener('resize', () => { if (results) { drawProfile(); drawSpectrum(); } });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (results) { drawProfile(); drawSpectrum(); drawTable(); updateMapRefl(); } });
+
+updateMapSites(params());
+loadTerrain(false);
+</script>
+</body>
+</html>
