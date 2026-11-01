@@ -76,7 +76,7 @@ canvas{width:100%;display:block}
 table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
 th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
 th{font-weight:500;color:var(--muted);vertical-align:bottom}
-th:first-child,td:first-child{text-align:left}
+th.lk,td.lk{text-align:left;vertical-align:middle}
 td.cls{text-align:left;font-weight:500}
 .notes{font-size:13px;color:var(--muted);max-width:90ch}
 .notes li{margin:3px 0}
@@ -218,12 +218,12 @@ td.cls{text-align:left;font-weight:500}
     <div class="tablewrap">
     <table>
       <thead><tr>
-        <th>Link</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
+        <th class="lk">Link</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
         <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at A<br>(°)</th><th>Off-axis at B<br>(°)</th>
         <th>Antenna<br>discrimination (dB)</th><th>Divergence<br>loss (dB)</th><th>Reflected level<br>vs direct (dB)</th><th>Nominal<br>phase (°)</th>
         <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td colspan="16" style="text-align:left;color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="lk" colspan="16" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
     </table>
     </div>
     <div class="summary" id="skew"></div>
@@ -709,10 +709,10 @@ function drawTable() {
   const { p, links, ant } = results; const T = 1 / p.rs;
   $('tbody').innerHTML = links.map(l => {
     const sw = `<i class="sw" style="background:${css(l.col)};margin-right:6px"></i>`;
-    if (!l.ok) return `<tr><td>${sw}${l.name}</td><td colspan="13" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
+    if (!l.ok) return `<tr><td class="lk">${sw}${l.name}</td><td colspan="13" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
     const n = l.refl.length;
     return l.refl.map((r, k) => `<tr>
-      ${k === 0 ? `<td rowspan="${n}">${sw}${l.name}</td>` : ''}
+      ${k === 0 ? `<td class="lk" rowspan="${n}">${sw}${l.name}</td>` : ''}
       <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${r.graze.toFixed(3)}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
       <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td><td>${r.offRefA.toFixed(3)}</td><td>${r.offRefB.toFixed(3)}</td>
       <td>${r.disc.toFixed(1)}</td><td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
