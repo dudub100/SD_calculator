@@ -42,6 +42,12 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .hint{font-size:12px;color:var(--muted);margin-top:4px;min-height:1.2em}
 .hint.err{color:var(--warn)}
 .coords{display:grid;gap:8px}
+.scen{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;display:grid;gap:8px}
+.scen h3{font-size:14px;font-weight:600;margin:0}
+.scen .line{display:flex;gap:6px;align-items:end}
+.scen .line > *{flex:0 0 auto}
+.scen .line select,.scen .line input{flex:1 1 auto}
+.scen button{padding:6px 10px;font-size:13.5px}
 .ant{font-size:12.5px;color:var(--ink);margin:8px 0 4px}
 button{font:inherit;font-size:14px;border-radius:6px;padding:7px 12px;cursor:pointer;border:1px solid var(--accent);
   background:var(--accent);color:var(--surface)}
@@ -152,6 +158,23 @@ td.cls{text-align:left;font-weight:500}
     <button id="btnFlat" class="ghost">Use flat ground</button>
   </div>
   <div id="status">Set both sites, then load terrain. You can also drag the A and B markers on the map.</div>
+  <div class="scen">
+    <h3>Scenarios</h3>
+    <div class="line">
+      <label style="flex:1">Name<input id="scName" type="text" autocomplete="off" placeholder="e.g. Site 12 to Site 7, 6 GHz"></label>
+      <button id="btnSave">Save</button>
+    </div>
+    <div class="line">
+      <label style="flex:1">Saved scenarios<select id="scList"><option value="">No saved scenarios</option></select></label>
+      <button id="btnRestore" class="ghost">Load</button>
+      <button id="btnDelete" class="ghost">Delete</button>
+    </div>
+    <div class="line">
+      <button id="btnExport" class="ghost">Export to file</button>
+      <button id="btnImport" class="ghost">Import from file</button>
+      <input id="fileImport" type="file" accept=".json,application/json" hidden>
+    </div>
+  </div>
 </aside>
 
 <main>
@@ -736,6 +759,88 @@ let reloadTimer = null;
 function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => loadTerrain(false), 400); }
 mA.on('dragend', e => { const ll = e.target.getLatLng(); $('aLat').value = fmtCoord(ll.lat, true); $('aLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
 mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCoord(ll.lat, true); $('bLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
+
+
+/* ---------- scenarios: save / restore ---------- */
+const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd',
+  'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo'];
+const SC_KEY = 'sdPlanner.scenarios.v1';
+function scLoadAll() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
+function scSaveAll(o) { try { localStorage.setItem(SC_KEY, JSON.stringify(o)); return true; } catch (e) { return false; } }
+function scSnapshot(name) {
+  const values = {}; SC_FIELDS.forEach(id => values[id] = $(id).value);
+  const sc = { app: 'sd-reflection-planner', version: 1, name, saved: new Date().toISOString(), values, phase: +$('phase').value };
+  if (profile) sc.terrain = { N: profile.N, src: profile.src, elev: profile.elev.map(v => Math.round(v * 100) / 100) };
+  return sc;
+}
+function scRefreshList(select) {
+  const all = scLoadAll(), names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+  const el = $('scList');
+  el.innerHTML = names.length
+    ? names.map(n => `<option value="${n.replace(/"/g, '&quot;')}">${n.replace(/</g, '&lt;')} (${new Date(all[n].saved).toLocaleString()})</option>`).join('')
+    : '<option value="">No saved scenarios</option>';
+  if (select && names.includes(select)) el.value = select;
+}
+function scApply(sc) {
+  if (!sc || !sc.values) { status('That scenario has no settings in it.', true); return; }
+  stopScan();
+  if (sc.values.cfmt) $('cfmt').value = sc.values.cfmt;
+  SC_FIELDS.forEach(id => { if (id !== 'cfmt' && sc.values[id] !== undefined) $(id).value = sc.values[id]; });
+  const ph = Number.isFinite(sc.phase) ? sc.phase : 0;
+  $('phase').value = ph; phiS = ph * rad; $('phaseVal').textContent = ph + '°';
+  $('scName').value = sc.name || '';
+  if (!coordHints()) { status('The scenario’s coordinates are not recognised. Check the fields marked in red.', true); return; }
+  const p = params(); updateMapSites(p);
+  const t = sc.terrain;
+  if (t && Array.isArray(t.elev) && t.elev.length === t.N && t.N > 1) {
+    const d = gcDist(p.A, p.B);
+    const pts = Array.from({ length: t.N }, (_, i) => gcInterp(p.A, p.B, i / (t.N - 1)));
+    profile = { d, N: t.N, pts, xs: pts.map((_, i) => d * i / (t.N - 1)), elev: t.elev.slice(), src: (t.src || 'saved terrain') + ' (saved with scenario)' };
+    compute();
+    status(`Loaded “${sc.name}” with its saved terrain. Press Load terrain and calculate to download fresh terrain.`);
+  } else {
+    status(`Loaded “${sc.name}”. Downloading terrain…`);
+    loadTerrain(false);
+  }
+}
+$('btnSave').addEventListener('click', () => {
+  let name = $('scName').value.trim();
+  if (!name) { name = 'Scenario ' + new Date().toLocaleString(); $('scName').value = name; }
+  const all = scLoadAll();
+  if (all[name] && !confirm(`Replace the saved scenario “${name}”?`)) return;
+  all[name] = scSnapshot(name);
+  if (scSaveAll(all)) { scRefreshList(name); status(`Saved “${name}” in this browser.`); }
+  else status('This browser blocked saving. Use Export to file instead.', true);
+});
+$('btnRestore').addEventListener('click', () => {
+  const name = $('scList').value; if (!name) { status('There is no saved scenario to load yet. Save one first.', true); return; }
+  scApply(scLoadAll()[name]);
+});
+$('btnDelete').addEventListener('click', () => {
+  const name = $('scList').value; if (!name) return;
+  if (!confirm(`Delete the saved scenario “${name}”?`)) return;
+  const all = scLoadAll(); delete all[name]; scSaveAll(all); scRefreshList(); status(`Deleted “${name}”.`);
+});
+$('btnExport').addEventListener('click', () => {
+  const name = $('scName').value.trim() || 'sd-scenario';
+  const blob = new Blob([JSON.stringify(scSnapshot(name), null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name.replace(/[^\w.-]+/g, '_') + '.json';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  status(`Exported “${name}” to a file.`);
+});
+$('btnImport').addEventListener('click', () => $('fileImport').click());
+$('fileImport').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const sc = JSON.parse(await f.text());
+    if (sc.app !== 'sd-reflection-planner' || !sc.values) throw new Error('not a scenario file');
+    sc.name = sc.name || f.name.replace(/\.json$/i, '');
+    const all = scLoadAll(); all[sc.name] = sc; scSaveAll(all); scRefreshList(sc.name);
+    scApply(sc);
+  } catch (err) { status('That file is not a scenario exported from this planner.', true); }
+});
+scRefreshList();
 
 /* ---------- events ---------- */
 ['aLat', 'aLon', 'bLat', 'bLon'].forEach(id => {
