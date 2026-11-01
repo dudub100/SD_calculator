@@ -39,6 +39,9 @@ label{display:flex;flex-direction:column;font-size:12.5px;color:var(--muted);gap
 input,select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);
   border-radius:6px;padding:5px 7px;width:100%;min-width:0}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.hint{font-size:12px;color:var(--muted);margin-top:4px;min-height:1.2em}
+.hint.err{color:var(--warn)}
+.coords{display:grid;gap:8px}
 .ant{font-size:12.5px;color:var(--ink);margin:8px 0 4px}
 button{font:inherit;font-size:14px;border-radius:6px;padding:7px 12px;cursor:pointer;border:1px solid var(--accent);
   background:var(--accent);color:var(--surface)}
@@ -83,12 +86,19 @@ td.cls{text-align:left;font-weight:500}
 
 <div class="layout">
 <aside>
+  <label style="margin-bottom:12px">Coordinate format
+    <select id="cfmt">
+      <option value="dms" selected>Degrees minutes seconds (44 16 30.49N)</option>
+      <option value="dec">Decimal degrees (44.275136)</option>
+    </select>
+  </label>
   <fieldset>
     <legend>Site A (local)</legend>
-    <div class="row">
-      <label>Latitude<input id="aLat" type="number" step="0.0001" value="52.0000"></label>
-      <label>Longitude<input id="aLon" type="number" step="0.0001" value="5.0000"></label>
+    <div class="coords">
+      <label>Latitude<input id="aLat" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="52 00 00.00N"></label>
+      <label>Longitude<input id="aLon" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="5 00 00.00E"></label>
     </div>
+    <div class="hint" id="aHint"></div>
     <div class="ant">Main antenna</div>
     <div class="row">
       <label>Height above ground (m)<input id="aHm" type="number" step="0.5" value="30"></label>
@@ -102,10 +112,11 @@ td.cls{text-align:left;font-weight:500}
   </fieldset>
   <fieldset>
     <legend>Site B (remote)</legend>
-    <div class="row">
-      <label>Latitude<input id="bLat" type="number" step="0.0001" value="52.3000"></label>
-      <label>Longitude<input id="bLon" type="number" step="0.0001" value="5.3500"></label>
+    <div class="coords">
+      <label>Latitude<input id="bLat" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="52 18 00.00N"></label>
+      <label>Longitude<input id="bLon" type="text" inputmode="text" autocomplete="off" spellcheck="false" value="5 21 00.00E"></label>
     </div>
+    <div class="hint" id="bHint"></div>
     <div class="ant">Main antenna</div>
     <div class="row">
       <label>Height above ground (m)<input id="bHm" type="number" step="0.5" value="30"></label>
@@ -184,12 +195,12 @@ td.cls{text-align:left;font-weight:500}
     <div class="tablewrap">
     <table>
       <thead><tr>
-        <th>Link</th><th>Reflection point<br>from A (km)</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
+        <th>Link</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
         <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at A<br>(°)</th><th>Off-axis at B<br>(°)</th>
-        <th>Antenna<br>discrimination (dB)</th><th>Reflected level<br>vs direct (dB)</th><th>Nominal<br>phase (°)</th>
+        <th>Antenna<br>discrimination (dB)</th><th>Divergence<br>loss (dB)</th><th>Reflected level<br>vs direct (dB)</th><th>Nominal<br>phase (°)</th>
         <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td colspan="14" style="text-align:left;color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
+      <tbody id="tbody"><tr><td colspan="16" style="text-align:left;color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
     </table>
     </div>
     <div class="summary" id="skew"></div>
@@ -200,9 +211,10 @@ td.cls{text-align:left;font-weight:500}
     <ul>
       <li>Terrain comes from AWS Terrarium elevation tiles (SRTM-based). If those cannot be read, the page falls back to the Open-Meteo elevation API, and then to flat ground.</li>
       <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines.</li>
-      <li>The reflection point is the point on the smoothed terrain that minimises the path length antenna → ground → antenna (Fermat’s principle), with both legs clear of the unsmoothed terrain. Rough or hilly terrain can have several specular points; the tool reports the strongest-geometry one.</li>
+      <li>Reflection points are every place on the smoothed terrain where the reflection law holds (equal grazing angles to both antennas relative to the local slope) and both legs clear the unsmoothed terrain. All of them are kept, strongest first, and all are summed in the spectrum.</li>
+      <li>Each point gets a divergence loss from the local surface curvature (earth bulge included), so convex hilltops and ridges spread the reflected energy and come out weaker than flat water or plains.</li>
       <li>Every antenna is aimed at the far-end main antenna. Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
-      <li>Ground reflection is total (0 dB plus the optional extra loss) with a 180° phase reversal. Divergence from earth curvature and surface roughness are not included, so the reflected level is a worst case.</li>
+      <li>Ground reflection is total (0 dB plus the optional extra loss) with a 180° phase reversal. Surface roughness is not included, so land reflections are a worst case; calm water is close to this assumption.</li>
       <li>Behaviour uses the delay × bandwidth product: below 0.05 the fade is flat across the channel, 0.05–0.3 gives a tilt or slope, and above 0.3 a notch can sit inside the band.</li>
     </ul>
   </section>
@@ -223,10 +235,76 @@ const LINKS = [
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const num = id => parseFloat($(id).value);
 
+/* ---------- coordinate parsing: decimal or DMS (44 16 30.49N, 44°16'30.49"N, -44 16 30.49, 441630.49N) ---------- */
+function parseCoord(str, isLat) {
+  let s = String(str || '').trim().toUpperCase();
+  if (!s) return NaN;
+  let sign = 1;
+  const hemi = s.match(/[NSEW]/g);
+  if (hemi) {
+    if (hemi.length > 1) return NaN;
+    const h = hemi[0];
+    if (isLat ? (h === 'E' || h === 'W') : (h === 'N' || h === 'S')) return NaN;
+    if (h === 'S' || h === 'W') sign = -1;
+    s = s.replace(/[NSEW]/, ' ');
+  }
+  s = s.trim();
+  if (s.startsWith('-')) { sign = -sign; s = s.slice(1); } else if (s.startsWith('+')) s = s.slice(1);
+  s = s.replace(/[°º˚'’′"”″:,]/g, ' ').trim();
+  if (/[^0-9.\s]/.test(s)) return NaN;
+  let parts = s.split(/\s+/).filter(Boolean).map(Number);
+  if (!parts.length || parts.length > 3 || parts.some(isNaN)) return NaN;
+  const lim = isLat ? 90 : 180;
+  if (parts.length === 1 && hemi && parts[0] > lim) {          // packed DDMMSS.ss / DDDMMSS.ss
+    const x = parts[0], n = Math.floor(x);
+    parts = [Math.floor(n / 10000), Math.floor(n / 100) % 100, n % 100 + (x - n)];
+  }
+  const [d, m = 0, sec = 0] = parts;
+  if (parts.length > 1 && !Number.isInteger(d)) return NaN;
+  if (parts.length > 2 && !Number.isInteger(m)) return NaN;
+  if (m < 0 || m >= 60 || sec < 0 || sec >= 60) return NaN;
+  const v = sign * (d + m / 60 + sec / 3600);
+  return Math.abs(v) > lim ? NaN : v;
+}
+function fmtCoord(v, isLat) {
+  if ($('cfmt').value === 'dec') return v.toFixed(6);
+  const h = isLat ? (v < 0 ? 'S' : 'N') : (v < 0 ? 'W' : 'E');
+  const a = Math.abs(v);
+  let d = Math.floor(a), m = Math.floor((a - d) * 60), sec = Math.round(((a - d) * 60 - m) * 6000) / 100;
+  if (sec >= 60) { sec -= 60; m++; }
+  if (m >= 60) { m -= 60; d++; }
+  return `${d} ${String(m).padStart(2, '0')} ${sec.toFixed(2).padStart(5, '0')}${h}`;
+}
+function coordHints() {
+  let ok = true;
+  for (const site of ['a', 'b']) {
+    const lat = parseCoord($(site + 'Lat').value, true), lon = parseCoord($(site + 'Lon').value, false);
+    const el = $(site + 'Hint');
+    if (isNaN(lat) || isNaN(lon)) {
+      ok = false; el.className = 'hint err';
+      el.textContent = isNaN(lat) ? 'Latitude not recognised. Example: 44 16 30.49N or 44.275136' : 'Longitude not recognised. Example: 34 50 12.30E or 34.836750';
+    } else {
+      el.className = 'hint';
+      el.textContent = $('cfmt').value === 'dms' ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : `${fmtCoord2(lat, true)}, ${fmtCoord2(lon, false)}`;
+    }
+  }
+  return ok;
+}
+function fmtCoord2(v, isLat) { // always DMS, for the hint line in decimal mode
+  const f = $('cfmt').value; $('cfmt').value = 'dms'; const r = fmtCoord(v, isLat); $('cfmt').value = f; return r;
+}
+function reformatCoords() {
+  for (const id of ['aLat', 'aLon', 'bLat', 'bLon']) {
+    const isLat = id.endsWith('Lat'), v = parseCoord($(id).value, isLat);
+    if (!isNaN(v)) $(id).value = fmtCoord(v, isLat);
+  }
+  coordHints();
+}
+
 function params() {
   return {
-    A: { lat: num('aLat'), lon: num('aLon'), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd') },
-    B: { lat: num('bLat'), lon: num('bLon'), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd') },
+    A: { lat: parseCoord($('aLat').value, true), lon: parseCoord($('aLon').value, false), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd') },
+    B: { lat: parseCoord($('bLat').value, true), lon: parseCoord($('bLon').value, false), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd') },
     f: num('freq') * 1e9, bw: num('bw') * 1e6, rs: num('rs') * 1e6, k: num('kf'),
     rl: num('rloss') || 0, sm: Math.max(0, num('smooth') || 0), z: parseInt($('zoom').value, 10)
   };
@@ -313,7 +391,7 @@ async function openMeteoElev(pts) {
 let profile = null, results = null;
 async function loadTerrain(flat = false) {
   const p = params();
-  if ([p.A.lat, p.A.lon, p.B.lat, p.B.lon].some(isNaN)) { status('Enter valid coordinates for both sites.', true); return; }
+  if (!coordHints()) { status('One of the coordinates is not recognised. Fix the field marked in red.', true); return; }
   const d = gcDist(p.A, p.B);
   if (d < 500) { status('The sites are less than 500 m apart. Move one of them.', true); return; }
   updateMapSites(p);
@@ -371,44 +449,73 @@ function compute() {
     Bm: { x: d, y: elev[N - 1] + p.B.hm, D: p.B.Dm }, Bd: { x: d, y: elev[N - 1] + p.B.hd, D: p.B.Dd },
   };
 
-  const visible = (ax, ay, c) => {     // ray from antenna (ax,ay) to reflection sample c clears terrain
-    const px = xs[c], py = yS[c];
+  const visible = (ax, ay, px, py, c) => {   // ray antenna -> reflection point clears terrain
     const lo = Math.min(ax, px), hi = Math.max(ax, px);
     for (let j = 1; j < N - 1; j++) {
-      if (j === c || xs[j] <= lo || xs[j] >= hi) continue;
+      if (xs[j] <= lo || xs[j] >= hi || Math.abs(j - c) <= 1) continue;
       const ly = ay + (py - ay) * (xs[j] - ax) / (px - ax);
       const g = Math.abs(j - c) <= hw ? yS[j] : yT[j];
       if (ly < g - 0.5) return false;
     }
     return true;
   };
+  const slope = new Float64Array(N);
+  for (let i = 0; i < N; i++) { const a = Math.max(0, i - 1), b = Math.min(N - 1, i + 1); slope[i] = (yS[b] - yS[a]) / (xs[b] - xs[a]); }
+  const hc = Math.max(1, hw);
+  const curvature = c => {                     // convex > 0, 1/m
+    const a = Math.max(0, c - hc), b = Math.min(N - 1, c + hc), m = (b - a) / 2;
+    if (m < 1) return 0;
+    const ac = Math.max(0, c - Math.round(m)), bc = Math.min(N - 1, c + Math.round(m)), h = (bc - ac) / 2 * dx;
+    return -(yS[bc] - 2 * yS[c] + yS[ac]) / (h * h);
+  };
 
   const links = LINKS.map(L => {
     const a = ant[L.a], b = ant[L.b];
     const Ld = Math.hypot(b.x - a.x, b.y - a.y);
-    const Lp = new Float64Array(N);
-    for (let i = 0; i < N; i++) Lp[i] = Math.hypot(xs[i] - a.x, yS[i] - a.y) + Math.hypot(b.x - xs[i], b.y - yS[i]);
-    const cands = [];
-    for (let i = 1; i < N - 1; i++) if (Lp[i] <= Lp[i - 1] && Lp[i] <= Lp[i + 1]) cands.push(i);
-    cands.sort((i, j) => Lp[i] - Lp[j]);
-    let c = -1;
-    for (const i of cands.slice(0, 200)) if (visible(a.x, a.y, i) && visible(b.x, b.y, i)) { c = i; break; }
-    const out = { ...L, Ld, ok: c >= 0 };
-    if (c < 0) return out;
-    const P = { x: xs[c], y: yS[c] };
-    const Lr = Lp[c], tau = (Lr - Ld) / C;
-    const s = (yS[Math.min(c + 1, N - 1)] - yS[Math.max(c - 1, 0)]) / (xs[Math.min(c + 1, N - 1)] - xs[Math.max(c - 1, 0)]);
-    const g1 = angBetween([a.x - P.x, a.y - P.y], [-1, -s]), g2 = angBetween([b.x - P.x, b.y - P.y], [1, s]);
     const aimA = [ant.Bm.x - a.x, ant.Bm.y - a.y], aimB = [ant.Am.x - b.x, ant.Am.y - b.y];
-    const offDirA = angBetween(aimA, [b.x - a.x, b.y - a.y]), offRefA = angBetween(aimA, [P.x - a.x, P.y - a.y]);
-    const offDirB = angBetween(aimB, [a.x - b.x, a.y - b.y]), offRefB = angBetween(aimB, [P.x - b.x, P.y - b.y]);
-    const disc = discrimination(a.D, lam, offRefA) + discrimination(b.D, lam, offRefB)
-               - discrimination(a.D, lam, offDirA) - discrimination(b.D, lam, offDirB);
-    const rhoDb = disc + p.rl + 20 * Math.log10(Lr / Ld);
-    const phase0 = (((Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-    Object.assign(out, { c, P, Lr, tau, graze: (g1 + g2) / 2, offRefA, offRefB, disc, rhoDb, rho: 10 ** (-rhoDb / 20), phase0 });
+    const offDirA = angBetween(aimA, [b.x - a.x, b.y - a.y]), offDirB = angBetween(aimB, [a.x - b.x, a.y - b.y]);
+    const discDir = discrimination(a.D, lam, offDirA) + discrimination(b.D, lam, offDirB);
+    // signed grazing angles towards A and towards B; specular where they are equal (reflection law)
+    const gA = new Float64Array(N), gB = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+      const al = Math.atan(slope[i]);
+      gA[i] = Math.atan2(a.y - yS[i], xs[i] - a.x) + al;
+      gB[i] = Math.atan2(b.y - yS[i], b.x - xs[i]) - al;
+    }
+    let pts = [];
+    for (let i = 2; i < N - 3; i++) {
+      const e0 = gA[i] - gB[i], e1 = gA[i + 1] - gB[i + 1];
+      if (e0 === 0 || e0 * e1 < 0) {
+        const t = e0 === 0 ? 0 : e0 / (e0 - e1);
+        const ga = gA[i] + t * (gA[i + 1] - gA[i]), gb = gB[i] + t * (gB[i + 1] - gB[i]);
+        if (ga <= 0 || gb <= 0) continue;
+        const c = t < 0.5 ? i : i + 1;
+        const P = { x: xs[i] + t * dx, y: yS[i] + t * (yS[i + 1] - yS[i]) };
+        if (!visible(a.x, a.y, P.x, P.y, c) || !visible(b.x, b.y, P.x, P.y, c)) continue;
+        const Lr = Math.hypot(P.x - a.x, P.y - a.y) + Math.hypot(b.x - P.x, b.y - P.y);
+        const tau = (Lr - Ld) / C, psi = (ga + gb) / 2;
+        const offRefA = angBetween(aimA, [P.x - a.x, P.y - a.y]), offRefB = angBetween(aimB, [P.x - b.x, P.y - b.y]);
+        const disc = discrimination(a.D, lam, offRefA) + discrimination(b.D, lam, offRefB) - discDir;
+        const kap = curvature(c), d1 = P.x - a.x, d2 = b.x - P.x;
+        const Dv = kap > 0 ? 1 / Math.sqrt(1 + 2 * d1 * d2 * kap / ((d1 + d2) * Math.sin(psi))) : 1;
+        const divDb = -20 * Math.log10(Dv);
+        const rhoDb = disc + divDb + p.rl + 20 * Math.log10(Lr / Ld);
+        const phase0 = (((Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        const t2 = c === i ? t : t - 1;
+        const ll = profile.pts[i], ll2 = profile.pts[i + 1];
+        pts.push({ i, t, c, P, Lr, tau, graze: psi / rad, offRefA, offRefB, disc, divDb, rhoDb, rho: 10 ** (-rhoDb / 20), phase0,
+          surface: kap > 1.5 / Re ? 'convex' : (kap < -0.5 / Re ? 'concave' : 'flat'),
+          lat: ll.lat + t * (ll2.lat - ll.lat), lon: ll.lon + t * (ll2.lon - ll.lon) });
+      }
+    }
+    // merge near-duplicates (within the smoothing window), keep the strongest, cap the list
+    pts.sort((u, v) => u.rhoDb - v.rhoDb);
+    const kept = [];
+    for (const q of pts) if (!kept.some(k => Math.abs(k.P.x - q.P.x) < Math.max(p.sm, 2 * dx))) kept.push(q);
+    const refl = kept.slice(0, 8);
+    const out = { ...L, Ld, refl, ok: refl.length > 0 };
     let worst = 0;
-    for (let k = 0; k < 72; k++) { const r = ripple(out, k * 5 * rad, p); worst = Math.max(worst, r.max - r.min); }
+    if (out.ok) for (let k = 0; k < 72; k++) { const r = ripple(out, k * 5 * rad, p); worst = Math.max(worst, r.max - r.min); }
     out.worst = worst;
     return out;
   });
@@ -424,9 +531,10 @@ function compute() {
   drawProfile(); drawTable(); drawSpectrum(); updateMapRefl();
 }
 
-function H2(l, f, phiS, p) { // |H|^2 at baseband offset f
-  const th = phiS + l.phase0 - 2 * Math.PI * f * l.tau;
-  return 1 + l.rho * l.rho + 2 * l.rho * Math.cos(th);
+function H2(l, f, phiS, p) { // |H|^2 at baseband offset f: direct ray plus every reflected ray
+  let re = 1, im = 0;
+  for (const r of l.refl) { const th = phiS + r.phase0 - 2 * Math.PI * f * r.tau; re += r.rho * Math.cos(th); im += r.rho * Math.sin(th); }
+  return re * re + im * im;
 }
 function ripple(l, phiS, p) {
   let mn = Infinity, mx = -Infinity;
@@ -439,11 +547,13 @@ function ripple(l, phiS, p) {
 }
 function behaviour(l, p) {
   if (!l.ok) return 'No visible reflection';
-  if (l.rhoDb > 25) return 'Reflection negligible';
-  const x = l.tau * p.bw;
-  if (x < 0.05) return 'Flat fade';
-  if (x < 0.3) return 'Flat with slope';
-  return 'Frequency-selective';
+  const sig = l.refl.filter(r => r.rhoDb <= 25);
+  if (!sig.length) return 'Reflections negligible';
+  const x = Math.max(...sig.map(r => r.tau)) * p.bw;
+  const multi = sig.length > 1 ? ' (multiple rays)' : '';
+  if (x < 0.05) return 'Flat fade' + multi;
+  if (x < 0.3) return 'Flat with slope' + multi;
+  return 'Frequency-selective' + multi;
 }
 
 /* ---------- canvas helpers ---------- */
@@ -505,20 +615,24 @@ function drawProfile() {
   // direct paths
   g.strokeStyle = css('--direct');
   for (const L of LINKS) { const A = ant[L.a], B = ant[L.b]; g.lineWidth = L.key === 'MM' ? 1.6 : 0.8; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke(); }
-  // reflected rays
+  // reflected rays (opacity follows reflected level)
   for (const l of links) {
-    if (!l.ok) continue; const A = ant[l.a], B = ant[l.b];
-    g.strokeStyle = css(l.col); g.lineWidth = 1.6;
-    g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(l.P.x), Y(l.P.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke();
-    g.fillStyle = css(l.col); g.beginPath(); g.arc(Xm(l.P.x), Y(l.P.y), 4, 0, 2 * Math.PI); g.fill();
+    const A = ant[l.a], B = ant[l.b];
+    for (const r of l.refl) {
+      const alpha = Math.max(0.25, Math.min(1, 1 - r.rhoDb / 30));
+      g.globalAlpha = alpha; g.strokeStyle = css(l.col); g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(r.P.x), Y(r.P.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke();
+      g.fillStyle = css(l.col); g.beginPath(); g.arc(Xm(r.P.x), Y(r.P.y), 4, 0, 2 * Math.PI); g.fill();
+    }
   }
+  g.globalAlpha = 1;
   // masts
   g.strokeStyle = css('--ink'); g.fillStyle = css('--ink'); g.lineWidth = 2;
   for (const [x, y0, tops] of [[0, yT[0], [ant.Am, ant.Ad]], [d, yT[yT.length - 1], [ant.Bm, ant.Bd]]]) {
     g.beginPath(); g.moveTo(Xm(x), Y(y0)); g.lineTo(Xm(x), Y(Math.max(...tops.map(t => t.y)))); g.stroke();
     for (const t of tops) { g.beginPath(); g.arc(Xm(x), Y(t.y), 3.5, 0, 2 * Math.PI); g.fill(); }
   }
-  $('profLegend').innerHTML = links.map(l => `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}${l.ok ? '' : ' (none)'}</span>`).join('')
+  $('profLegend').innerHTML = links.map(l => `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}${l.ok ? (l.refl.length > 1 ? ` (${l.refl.length} points)` : '') : ' (none)'}</span>`).join('')
     + `<span><i class="sw" style="background:${css('--fresnel')}"></i>1st Fresnel zone, main to main</span>`;
   $('profSummary').innerHTML = `Path <b>${(d / 1000).toFixed(2)} km</b>, terrain from ${profile.src}. Worst clearance of A main → B main is <b>${results.worstCl.toFixed(2)} × F1</b> at ${(results.worstX / 1000).toFixed(1)} km`
     + (results.worstCl < 0.6 ? ' (below the usual 0.6 × F1 criterion).' : '.');
@@ -570,14 +684,18 @@ function drawTable() {
   const { p, links, ant } = results; const T = 1 / p.rs;
   $('tbody').innerHTML = links.map(l => {
     const sw = `<i class="sw" style="background:${css(l.col)};margin-right:6px"></i>`;
-    if (!l.ok) return `<tr><td>${sw}${l.name}</td><td colspan="12" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
-    return `<tr><td>${sw}${l.name}</td><td>${(l.P.x / 1000).toFixed(2)}</td><td>${l.graze.toFixed(3)}</td><td>${(l.Lr - l.Ld).toFixed(3)}</td>
-      <td>${(l.tau * 1e9).toFixed(3)}</td><td>${(l.tau / T).toFixed(3)}</td><td>${l.offRefA.toFixed(3)}</td><td>${l.offRefB.toFixed(3)}</td>
-      <td>${l.disc.toFixed(1)}</td><td>${(-l.rhoDb).toFixed(1)}</td><td>${(l.phase0 / rad).toFixed(0)}</td>
-      <td>${(1 / l.tau / 1e6).toFixed(0)}</td><td id="rip-${l.key}"></td><td class="cls">${behaviour(l, p)}</td></tr>`;
+    if (!l.ok) return `<tr><td>${sw}${l.name}</td><td colspan="13" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
+    const n = l.refl.length;
+    return l.refl.map((r, k) => `<tr>
+      ${k === 0 ? `<td rowspan="${n}">${sw}${l.name}</td>` : ''}
+      <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${r.graze.toFixed(3)}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
+      <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td><td>${r.offRefA.toFixed(3)}</td><td>${r.offRefB.toFixed(3)}</td>
+      <td>${r.disc.toFixed(1)}</td><td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
+      <td>${(1 / r.tau / 1e6).toFixed(0)}</td>
+      ${k === 0 ? `<td rowspan="${n}" id="rip-${l.key}"></td><td rowspan="${n}" class="cls">${behaviour(l, p)}</td>` : ''}</tr>`).join('');
   }).join('');
   const dMM = Math.hypot(ant.Bm.x - ant.Am.x, ant.Bm.y - ant.Am.y), dMD = Math.hypot(ant.Bd.x - ant.Am.x, ant.Bd.y - ant.Am.y);
-  $('skew').innerHTML = `Direct-path delay difference between A main → B main and A main → B div: <b>${((dMD - dMM) / C * 1e12).toFixed(1)} ps</b>. The feeder skew from your SD cable is added on top of this and is normally far larger.`;
+  $('skew').innerHTML = `Rows are sorted strongest first; up to 8 reflection points per link are kept. Direct-path delay difference between A main → B main and A main → B div: <b>${((dMD - dMM) / C * 1e12).toFixed(1)} ps</b>. The feeder skew from your SD cable is added on top of this and is normally far larger.`;
   updateRippleCells();
 }
 function updateRippleCells() {
@@ -609,19 +727,26 @@ function updateMapSites(p, fit = true) {
 }
 function updateMapRefl() {
   reflMarkers.forEach(m => m.remove()); reflMarkers = [];
-  for (const l of results.links) {
-    if (!l.ok) continue; const pt = profile.pts[l.c];
-    reflMarkers.push(L.circleMarker([pt.lat, pt.lon], { radius: 6, color: css(l.col), fillColor: css(l.col), fillOpacity: .9, weight: 1 })
-      .bindTooltip(`${l.name}: ${(l.P.x / 1000).toFixed(2)} km from A`).addTo(map));
+  for (const l of results.links) for (const r of l.refl) {
+    reflMarkers.push(L.circleMarker([r.lat, r.lon], { radius: 6, color: css(l.col), fillColor: css(l.col), fillOpacity: .9, weight: 1 })
+      .bindTooltip(`${l.name}: ${(r.P.x / 1000).toFixed(2)} km from A, ${(-r.rhoDb).toFixed(1)} dB, ${(r.tau * 1e9).toFixed(3)} ns`).addTo(map));
   }
 }
 let reloadTimer = null;
 function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => loadTerrain(false), 400); }
-mA.on('dragend', e => { const ll = e.target.getLatLng(); $('aLat').value = ll.lat.toFixed(5); $('aLon').value = ll.lng.toFixed(5); scheduleReload(); });
-mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = ll.lat.toFixed(5); $('bLon').value = ll.lng.toFixed(5); scheduleReload(); });
+mA.on('dragend', e => { const ll = e.target.getLatLng(); $('aLat').value = fmtCoord(ll.lat, true); $('aLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
+mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCoord(ll.lat, true); $('bLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
 
 /* ---------- events ---------- */
-['aLat', 'aLon', 'bLat', 'bLon', 'zoom'].forEach(id => $(id).addEventListener('change', () => { updateMapSites(params()); scheduleReload(); }));
+['aLat', 'aLon', 'bLat', 'bLon'].forEach(id => {
+  $(id).addEventListener('input', coordHints);
+  $(id).addEventListener('change', () => {
+    if (!coordHints()) { status('One of the coordinates is not recognised. Fix the field marked in red.', true); return; }
+    reformatCoords(); updateMapSites(params()); scheduleReload();
+  });
+});
+$('zoom').addEventListener('change', () => scheduleReload());
+$('cfmt').addEventListener('change', reformatCoords);
 ['aHm', 'aDm', 'aHd', 'aDd', 'bHm', 'bDm', 'bHd', 'bDd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
   .forEach(id => $(id).addEventListener('input', () => compute()));
 $('btnLoad').addEventListener('click', () => loadTerrain(false));
@@ -644,6 +769,7 @@ $('btnScan').addEventListener('click', () => {
 window.addEventListener('resize', () => { if (results) { drawProfile(); drawSpectrum(); } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (results) { drawProfile(); drawSpectrum(); drawTable(); updateMapRefl(); } });
 
+coordHints();
 updateMapSites(params());
 loadTerrain(false);
 </script>
