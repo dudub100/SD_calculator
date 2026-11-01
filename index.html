@@ -87,7 +87,7 @@ td.cls{text-align:left;font-weight:500}
 <body>
 <header>
   <h1>Space-diversity reflection planner</h1>
-  <p>Finds the ground-reflection point for every main/diversity antenna pair, its delay and level relative to the direct path, and shows whether the resulting fade is flat or frequency-selective across your channel.</p>
+  <p>Finds the ground-reflection points on each transmit-main to receive path (main and diversity at both ends), its delay and level relative to the direct path, and shows whether the resulting fade is flat or frequency-selective across your channel.</p>
 </header>
 
 <div class="layout">
@@ -202,15 +202,15 @@ td.cls{text-align:left;font-weight:500}
       <button id="btnNominal" class="ghost">Back to nominal (0°)</button>
       <label>Show SD combining for
         <select id="combo" style="width:auto">
-          <option value="Am">Tx from A main</option>
-          <option value="Ad">Tx from A diversity</option>
+          <option value="B">Receiver at B (Tx from A main)</option>
+          <option value="A">Receiver at A (Tx from B main)</option>
           <option value="off">Off</option>
         </select>
       </label>
     </div>
     <canvas id="spectrum"></canvas>
     <div class="legend" id="specLegend"></div>
-    <div class="summary">At 0° the reflected ray has its geometric phase plus a 180° ground reflection. The slider adds the same extra phase to all four links, which mimics small changes in refractivity or reflection-point position. The shaded area is the channel bandwidth. The combined curve is ideal maximum-ratio combining of the two receive antennas at site B.</div>
+    <div class="summary">At 0° the reflected ray has its geometric phase plus a 180° ground reflection. The slider adds the same extra phase to all three paths, which mimics small changes in refractivity or reflection-point position. The shaded area is the channel bandwidth. Each site transmits only from its main antenna and receives on both its main and diversity antennas, so there are three distinct paths. The combined curve is ideal maximum-ratio combining of the two receive antennas at the selected site.</div>
   </section>
 
   <section class="panel">
@@ -249,11 +249,12 @@ td.cls{text-align:left;font-weight:500}
 "use strict";
 const C = 299792458, rad = Math.PI / 180, R0 = 6371008.8;
 const $ = id => document.getElementById(id);
+// Each site transmits only from its main antenna and receives on main + diversity.
+// Paths are reciprocal, so B main -> A div is the same geometry as A div <-> B main.
 const LINKS = [
-  { key: 'MM', a: 'Am', b: 'Bm', name: 'A main → B main', col: '--l0' },
+  { key: 'MM', a: 'Am', b: 'Bm', name: 'A main ↔ B main', col: '--l0' },
   { key: 'MD', a: 'Am', b: 'Bd', name: 'A main → B div',  col: '--l1' },
-  { key: 'DM', a: 'Ad', b: 'Bm', name: 'A div → B main',  col: '--l2' },
-  { key: 'DD', a: 'Ad', b: 'Bd', name: 'A div → B div',   col: '--l3' },
+  { key: 'DM', a: 'Ad', b: 'Bm', name: 'B main → A div',  col: '--l2' },
 ];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const num = id => parseFloat($(id).value);
@@ -684,14 +685,15 @@ function drawSpectrum() {
   }
   const combo = $('combo').value; let comboTxt = '';
   if (combo !== 'off') {
-    const pair = links.filter(l => l.a === combo);
+    const keys = combo === 'A' ? ['MM', 'DM'] : ['MM', 'MD'];
+    const pair = links.filter(l => keys.includes(l.key));
     g.strokeStyle = css('--ink'); g.lineWidth = 2.4; g.setLineDash([7, 4]); g.beginPath();
     fv.forEach((f, k) => {
       const s = pair.reduce((acc, l) => acc + (l.ok ? H2(l, f, phiS, p) : 1), 0) / pair.length;
       const v = 10 * Math.log10(Math.max(s, 1e-6)); k ? g.lineTo(X(f / 1e6), clampY(v)) : g.moveTo(X(f / 1e6), clampY(v));
     });
     g.stroke(); g.setLineDash([]);
-    comboTxt = `<span><i class="sw" style="background:${css('--ink')}"></i>SD combined at B, Tx from A ${combo === 'Am' ? 'main' : 'diversity'}</span>`;
+    comboTxt = `<span><i class="sw" style="background:${css('--ink')}"></i>SD combined at ${combo === 'A' ? 'A, Tx from B main' : 'B, Tx from A main'}</span>`;
   }
   g.restore();
   $('specLegend').innerHTML = links.map(l => {
@@ -785,6 +787,8 @@ function scApply(sc) {
   if (!sc || !sc.values) { status('That scenario has no settings in it.', true); return; }
   stopScan();
   if (sc.values.cfmt) $('cfmt').value = sc.values.cfmt;
+  if (sc.values.combo === 'Am') sc.values.combo = 'B';
+  if (sc.values.combo === 'Ad') sc.values.combo = 'A';
   SC_FIELDS.forEach(id => { if (id !== 'cfmt' && sc.values[id] !== undefined) $(id).value = sc.values[id]; });
   const ph = Number.isFinite(sc.phase) ? sc.phase : 0;
   $('phase').value = ph; phiS = ph * rad; $('phaseVal').textContent = ph + '°';
