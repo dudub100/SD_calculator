@@ -61,7 +61,7 @@ section.panel{background:var(--surface);border:1px solid var(--line);border-radi
 section.panel h2{font-size:16px;font-weight:600;margin:0 0 8px}
 #map{height:360px;border-radius:6px}
 canvas{width:100%;display:block}
-#profile{height:360px}
+#profile{height:430px}
 #spectrum{height:340px}
 .summary{font-size:13px;color:var(--muted);margin-top:8px}
 .summary b{color:var(--ink);font-weight:500}
@@ -185,6 +185,23 @@ td.cls{text-align:left;font-weight:500}
     </section>
     <section class="panel">
       <h2>Elevation profile (effective earth, k-factor applied)</h2>
+      <div class="scan" style="margin-bottom:6px">
+        <label>Direction
+          <select id="dir" style="width:auto">
+            <option value="AB">A → B (Tx A main, Rx B main + div)</option>
+            <option value="BA">B → A (Tx B main, Rx A main + div)</option>
+          </select>
+        </label>
+        <label>Angle labels
+          <select id="lblThr" style="width:auto">
+            <option value="20">Rays above −20 dB</option>
+            <option value="30" selected>Rays above −30 dB</option>
+            <option value="40">Rays above −40 dB</option>
+            <option value="999">All rays</option>
+            <option value="-1">Off</option>
+          </select>
+        </label>
+      </div>
       <canvas id="profile"></canvas>
       <div class="legend" id="profLegend"></div>
       <div class="summary" id="profSummary"></div>
@@ -200,17 +217,16 @@ td.cls{text-align:left;font-weight:500}
       </label>
       <button id="btnScan" class="ghost">Scan phase</button>
       <button id="btnNominal" class="ghost">Back to nominal (0°)</button>
-      <label>Show SD combining for
+      <label>SD combined curve
         <select id="combo" style="width:auto">
-          <option value="B">Receiver at B (Tx from A main)</option>
-          <option value="A">Receiver at A (Tx from B main)</option>
+          <option value="on">On</option>
           <option value="off">Off</option>
         </select>
       </label>
     </div>
     <canvas id="spectrum"></canvas>
     <div class="legend" id="specLegend"></div>
-    <div class="summary">At 0° the reflected ray has its geometric phase plus a 180° ground reflection. The slider adds the same extra phase to all three paths, which mimics small changes in refractivity or reflection-point position. The shaded area is the channel bandwidth. Each site transmits only from its main antenna and receives on both its main and diversity antennas, so there are three distinct paths. The combined curve is ideal maximum-ratio combining of the two receive antennas at the selected site.</div>
+    <div class="summary">At 0° the reflected ray has its geometric phase plus a 180° ground reflection. The slider adds the same extra phase to all reflected rays, which mimics small changes in refractivity or reflection-point position. The shaded area is the channel bandwidth. The direction selector above the profile chooses which site transmits (always from its main antenna); the two curves are the main and diversity receive antennas at the other site, and the combined curve is ideal maximum-ratio combining of those two.</div>
   </section>
 
   <section class="panel">
@@ -218,12 +234,12 @@ td.cls{text-align:left;font-weight:500}
     <div class="tablewrap">
     <table>
       <thead><tr>
-        <th class="lk">Link</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
-        <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at A<br>(°)</th><th>Off-axis at B<br>(°)</th>
-        <th>Antenna<br>discrimination (dB)</th><th>Divergence<br>loss (dB)</th><th>Reflected level<br>vs direct (dB)</th><th>Nominal<br>phase (°)</th>
+        <th class="lk">Link</th><th class="lk">Ray</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
+        <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at<br>Tx antenna (°)</th><th>Tx antenna vs<br>boresight (dB)</th>
+        <th>Off-axis at<br>Rx antenna (°)</th><th>Rx antenna vs<br>boresight (dB)</th><th>Divergence<br>loss (dB)</th><th>Level vs<br>direct ray (dB)</th><th>Nominal<br>phase (°)</th>
         <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td class="lk" colspan="16" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="lk" colspan="18" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
     </table>
     </div>
     <div class="summary" id="skew"></div>
@@ -251,11 +267,20 @@ const C = 299792458, rad = Math.PI / 180, R0 = 6371008.8;
 const $ = id => document.getElementById(id);
 // Each site transmits only from its main antenna and receives on main + diversity.
 // Paths are reciprocal, so B main -> A div is the same geometry as A div <-> B main.
-const LINKS = [
-  { key: 'MM', a: 'Am', b: 'Bm', name: 'A main ↔ B main', col: '--l0' },
-  { key: 'MD', a: 'Am', b: 'Bd', name: 'A main → B div',  col: '--l1' },
-  { key: 'DM', a: 'Ad', b: 'Bm', name: 'B main → A div',  col: '--l2' },
-];
+const LINKSETS = {
+  AB: [{ key: 'MM', a: 'Am', b: 'Bm', tx: 'A', name: 'A main → B main', col: '--l0' },
+       { key: 'MD', a: 'Am', b: 'Bd', tx: 'A', name: 'A main → B div',  col: '--l1' }],
+  BA: [{ key: 'MM', a: 'Am', b: 'Bm', tx: 'B', name: 'B main → A main', col: '--l0' },
+       { key: 'DM', a: 'Ad', b: 'Bm', tx: 'B', name: 'B main → A div',  col: '--l2' }],
+};
+const curLinks = () => LINKSETS[document.getElementById('dir').value] || LINKSETS.AB;
+// off-axis angle and antenna attenuation at the Tx and Rx ends, for a reflection r or for the direct ray (r = null)
+function txrx(l, r) {
+  const oA = r ? r.offRefA : l.offDirA, oB = r ? r.offRefB : l.offDirB;
+  const aA = r ? r.attA : l.attDirA, aB = r ? r.attB : l.attDirB;
+  return l.tx === 'A' ? { offTx: oA, attTx: aA, offRx: oB, attRx: aB } : { offTx: oB, attTx: aB, offRx: oA, attRx: aA };
+}
+const fmtAtt = a => (a < 0.05 ? '0.0' : '−' + a.toFixed(1));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const num = id => parseFloat($(id).value);
 
@@ -493,12 +518,13 @@ function compute() {
     return -(yS[bc] - 2 * yS[c] + yS[ac]) / (h * h);
   };
 
-  const links = LINKS.map(L => {
+  const links = curLinks().map(L => {
     const a = ant[L.a], b = ant[L.b];
     const Ld = Math.hypot(b.x - a.x, b.y - a.y);
     const aimA = [ant.Bm.x - a.x, ant.Bm.y - a.y], aimB = [ant.Am.x - b.x, ant.Am.y - b.y];
     const offDirA = angBetween(aimA, [b.x - a.x, b.y - a.y]), offDirB = angBetween(aimB, [a.x - b.x, a.y - b.y]);
-    const discDir = discrimination(a.D, lam, offDirA) + discrimination(b.D, lam, offDirB);
+    const attDirA = discrimination(a.D, lam, offDirA), attDirB = discrimination(b.D, lam, offDirB);
+    const discDir = attDirA + attDirB;
     // signed grazing angles towards A and towards B; specular where they are equal (reflection law)
     const gA = new Float64Array(N), gB = new Float64Array(N);
     for (let i = 0; i < N; i++) {
@@ -519,7 +545,8 @@ function compute() {
         const Lr = Math.hypot(P.x - a.x, P.y - a.y) + Math.hypot(b.x - P.x, b.y - P.y);
         const tau = (Lr - Ld) / C, psi = (ga + gb) / 2;
         const offRefA = angBetween(aimA, [P.x - a.x, P.y - a.y]), offRefB = angBetween(aimB, [P.x - b.x, P.y - b.y]);
-        const disc = discrimination(a.D, lam, offRefA) + discrimination(b.D, lam, offRefB) - discDir;
+        const attA = discrimination(a.D, lam, offRefA), attB = discrimination(b.D, lam, offRefB);
+        const disc = attA + attB - discDir;
         const kap = curvature(c), d1 = P.x - a.x, d2 = b.x - P.x;
         const Dv = kap > 0 ? 1 / Math.sqrt(1 + 2 * d1 * d2 * kap / ((d1 + d2) * Math.sin(psi))) : 1;
         const divDb = -20 * Math.log10(Dv);
@@ -527,7 +554,7 @@ function compute() {
         const phase0 = (((Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
         const t2 = c === i ? t : t - 1;
         const ll = profile.pts[i], ll2 = profile.pts[i + 1];
-        pts.push({ i, t, c, P, Lr, tau, graze: psi / rad, offRefA, offRefB, disc, divDb, rhoDb, rho: 10 ** (-rhoDb / 20), phase0,
+        pts.push({ i, t, c, P, Lr, tau, graze: psi / rad, offRefA, offRefB, attA, attB, disc, divDb, rhoDb, rho: 10 ** (-rhoDb / 20), phase0,
           surface: kap > 1.5 / Re ? 'convex' : (kap < -0.5 / Re ? 'concave' : 'flat'),
           lat: ll.lat + t * (ll2.lat - ll.lat), lon: ll.lon + t * (ll2.lon - ll.lon) });
       }
@@ -537,7 +564,7 @@ function compute() {
     const kept = [];
     for (const q of pts) if (!kept.some(k => Math.abs(k.P.x - q.P.x) < Math.max(p.sm, 2 * dx))) kept.push(q);
     const refl = kept.slice(0, 8);
-    const out = { ...L, Ld, refl, ok: refl.length > 0 };
+    const out = { ...L, Ld, refl, ok: refl.length > 0, offDirA, offDirB, attDirA, attDirB };
     let worst = 0;
     if (out.ok) for (let k = 0; k < 72; k++) { const r = ripple(out, k * 5 * rad, p); worst = Math.max(worst, r.max - r.min); }
     out.worst = worst;
@@ -638,7 +665,7 @@ function drawProfile() {
   g.setLineDash([]);
   // direct paths
   g.strokeStyle = css('--direct');
-  for (const L of LINKS) { const A = ant[L.a], B = ant[L.b]; g.lineWidth = L.key === 'MM' ? 1.6 : 0.8; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke(); }
+  for (const L of links) { const A = ant[L.a], B = ant[L.b]; g.lineWidth = L.key === 'MM' ? 1.6 : 0.9; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke(); }
   // reflected rays (opacity follows reflected level)
   for (const l of links) {
     const A = ant[l.a], B = ant[l.b];
@@ -656,10 +683,59 @@ function drawProfile() {
     g.beginPath(); g.moveTo(Xm(x), Y(y0)); g.lineTo(Xm(x), Y(Math.max(...tops.map(t => t.y)))); g.stroke();
     for (const t of tops) { g.beginPath(); g.arc(Xm(x), Y(t.y), 3.5, 0, 2 * Math.PI); g.fill(); }
   }
-  $('profLegend').innerHTML = links.map(l => `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}${l.ok ? (l.refl.length > 1 ? ` (${l.refl.length} points)` : '') : ' (none)'}</span>`).join('')
-    + `<span><i class="sw" style="background:${css('--fresnel')}"></i>1st Fresnel zone, main to main</span>`;
+  // transmitter marker
+  const txAnt = links[0].tx === 'A' ? ant.Am : ant.Bm;
+  g.strokeStyle = css('--accent'); g.lineWidth = 2; g.beginPath(); g.arc(Xm(txAnt.x), Y(txAnt.y), 8, 0, 2 * Math.PI); g.stroke();
+  g.fillStyle = css('--accent'); g.font = '500 12px "IBM Plex Sans", system-ui, sans-serif'; g.textBaseline = 'middle';
+  g.textAlign = links[0].tx === 'A' ? 'left' : 'right';
+  g.fillText('Tx', Xm(txAnt.x) + (links[0].tx === 'A' ? 12 : -12), Y(txAnt.y) - 12);
+  drawAngleLabels(g, box, Xm, Y, links, ant, d);
+  $('profLegend').innerHTML = links.map(l => `<span><i class="sw" style="background:${css(l.col)}"></i>${l.name}${l.ok ? (l.refl.length > 1 ? ` (${l.refl.length} reflections)` : '') : ' (no reflection)'}</span>`).join('')
+    + `<span><i class="sw" style="background:${css('--direct')}"></i>Direct rays</span>`
+    + `<span><i class="sw" style="background:${css('--fresnel')}"></i>1st Fresnel zone, main to main</span>`
+    + `<span>Labels: off-axis angle / antenna level vs boresight at the Tx and Rx antennas</span>`;
   $('profSummary').innerHTML = `Path <b>${(d / 1000).toFixed(2)} km</b>, terrain from ${profile.src}. Worst clearance of A main → B main is <b>${results.worstCl.toFixed(2)} × F1</b> at ${(results.worstX / 1000).toFixed(1)} km`
     + (results.worstCl < 0.6 ? ' (below the usual 0.6 × F1 criterion).' : '.');
+}
+
+
+/* ---------- angle labels on the profile ---------- */
+function drawAngleLabels(g, box, Xm, Y, links, ant, d) {
+  const thr = +$('lblThr').value; if (thr < 0) return;
+  g.font = '11px "IBM Plex Sans", system-ui, sans-serif'; g.textBaseline = 'top'; g.textAlign = 'left';
+  const placed = [], LH = 13;
+  const place = (lines, px, py, col) => {
+    const w = Math.max(...lines.map(s => g.measureText(s).width)) + 10, h = lines.length * LH + 6;
+    const hit = (x, y) => placed.some(q => x < q.x + q.w + 2 && x + w + 2 > q.x && y < q.y + q.h + 2 && y + h + 2 > q.y);
+    const x = Math.min(Math.max(px - w / 2, box.l + 2), box.r - w - 2);
+    const cands = [];
+    for (let k = 0; k < 14; k++) { cands.push(py - h - 10 - k * (h + 4)); cands.push(py + 10 + k * (h + 4)); }
+    let y = null;
+    for (const c of cands) if (c >= box.t && c + h <= box.b && !hit(x, c)) { y = c; break; }
+    if (y === null) return;
+    placed.push({ x, y, w, h });
+    g.strokeStyle = col; g.lineWidth = 0.8; g.beginPath();
+    g.moveTo(px, py); g.lineTo(Math.min(Math.max(px, x), x + w), y > py ? y : y + h); g.stroke();
+    g.globalAlpha = 0.9; g.fillStyle = css('--surface'); g.fillRect(x, y, w, h); g.globalAlpha = 1;
+    g.strokeStyle = col; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    g.fillStyle = css('--ink'); lines.forEach((s, i) => g.fillText(s, x + 5, y + 3 + i * LH));
+  };
+  const items = [];
+  for (const l of links) {
+    const A = ant[l.a], B = ant[l.b];
+    // direct ray label near the receive end
+    const t = txrx(l, null), xr = l.tx === 'A' ? 0.82 : 0.18;
+    items.push({ pri: 0, col: css('--direct'), px: Xm(xr * d), py: Y(A.y + (B.y - A.y) * xr),
+      lines: [`Direct, ${l.name}`, `Tx ${t.offTx.toFixed(2)}° / ${fmtAtt(t.attTx)} dB · Rx ${t.offRx.toFixed(2)}° / ${fmtAtt(t.attRx)} dB`] });
+    for (const r of l.refl) {
+      if (r.rhoDb > thr) continue;
+      const q = txrx(l, r);
+      items.push({ pri: 1 + r.rhoDb / 100, col: css(l.col), px: Xm(r.P.x), py: Y(r.P.y),
+        lines: [`${l.name}: ${(-r.rhoDb).toFixed(1)} dB, ${(r.tau * 1e9).toFixed(2)} ns`,
+                `Tx ${q.offTx.toFixed(2)}° / ${fmtAtt(q.attTx)} dB`, `Rx ${q.offRx.toFixed(2)}° / ${fmtAtt(q.attRx)} dB`] });
+    }
+  }
+  items.sort((a, b) => a.pri - b.pri).forEach(it => place(it.lines, it.px, it.py, it.col));
 }
 
 /* ---------- spectrum ---------- */
@@ -685,15 +761,14 @@ function drawSpectrum() {
   }
   const combo = $('combo').value; let comboTxt = '';
   if (combo !== 'off') {
-    const keys = combo === 'A' ? ['MM', 'DM'] : ['MM', 'MD'];
-    const pair = links.filter(l => keys.includes(l.key));
+    const pair = links;
     g.strokeStyle = css('--ink'); g.lineWidth = 2.4; g.setLineDash([7, 4]); g.beginPath();
     fv.forEach((f, k) => {
       const s = pair.reduce((acc, l) => acc + (l.ok ? H2(l, f, phiS, p) : 1), 0) / pair.length;
       const v = 10 * Math.log10(Math.max(s, 1e-6)); k ? g.lineTo(X(f / 1e6), clampY(v)) : g.moveTo(X(f / 1e6), clampY(v));
     });
     g.stroke(); g.setLineDash([]);
-    comboTxt = `<span><i class="sw" style="background:${css('--ink')}"></i>SD combined at ${combo === 'A' ? 'A, Tx from B main' : 'B, Tx from A main'}</span>`;
+    comboTxt = `<span><i class="sw" style="background:${css('--ink')}"></i>SD combined at ${links[0].tx === 'A' ? 'B' : 'A'} (main + diversity)</span>`;
   }
   g.restore();
   $('specLegend').innerHTML = links.map(l => {
@@ -706,21 +781,30 @@ function drawSpectrum() {
 
 /* ---------- table ---------- */
 function drawTable() {
-  const { p, links, ant } = results; const T = 1 / p.rs;
+  const { p, links } = results; const T = 1 / p.rs;
   $('tbody').innerHTML = links.map(l => {
     const sw = `<i class="sw" style="background:${css(l.col)};margin-right:6px"></i>`;
-    if (!l.ok) return `<tr><td class="lk">${sw}${l.name}</td><td colspan="13" style="text-align:left">No specular point with both legs clear of the terrain.</td><td class="cls">${behaviour(l, p)}</td></tr>`;
-    const n = l.refl.length;
-    return l.refl.map((r, k) => `<tr>
-      ${k === 0 ? `<td class="lk" rowspan="${n}">${sw}${l.name}</td>` : ''}
+    const t = txrx(l, null);
+    const n = 1 + Math.max(l.refl.length, 1);
+    const direct = `<tr>
+      <td class="lk" rowspan="${n}">${sw}${l.name}</td><td class="lk">Direct</td><td>—</td><td>—</td><td>—</td>
+      <td>0 (L = ${(l.Ld / 1000).toFixed(3)} km)</td><td>0</td><td>0</td>
+      <td>${t.offTx.toFixed(3)}</td><td>${fmtAtt(t.attTx)}</td><td>${t.offRx.toFixed(3)}</td><td>${fmtAtt(t.attRx)}</td>
+      <td>—</td><td>0.0 (reference)</td><td>—</td><td>—</td>
+      <td rowspan="${n}" id="rip-${l.key}"></td><td rowspan="${n}" class="cls">${behaviour(l, p)}</td></tr>`;
+    if (!l.ok) return direct + `<tr><td class="lk" colspan="15">No specular point with both legs clear of the terrain.</td></tr>`;
+    return direct + l.refl.map((r, k) => {
+      const q = txrx(l, r);
+      return `<tr><td class="lk">Reflection ${k + 1}</td>
       <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${r.graze.toFixed(3)}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
-      <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td><td>${r.offRefA.toFixed(3)}</td><td>${r.offRefB.toFixed(3)}</td>
-      <td>${r.disc.toFixed(1)}</td><td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
-      <td>${(1 / r.tau / 1e6).toFixed(0)}</td>
-      ${k === 0 ? `<td rowspan="${n}" id="rip-${l.key}"></td><td rowspan="${n}" class="cls">${behaviour(l, p)}</td>` : ''}</tr>`).join('');
+      <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td>
+      <td>${q.offTx.toFixed(3)}</td><td>${fmtAtt(q.attTx)}</td><td>${q.offRx.toFixed(3)}</td><td>${fmtAtt(q.attRx)}</td>
+      <td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
+      <td>${(1 / r.tau / 1e6).toFixed(0)}</td></tr>`;
+    }).join('');
   }).join('');
-  const dMM = Math.hypot(ant.Bm.x - ant.Am.x, ant.Bm.y - ant.Am.y), dMD = Math.hypot(ant.Bd.x - ant.Am.x, ant.Bd.y - ant.Am.y);
-  $('skew').innerHTML = `Rows are sorted strongest first; up to 8 reflection points per link are kept. Direct-path delay difference between A main → B main and A main → B div: <b>${((dMD - dMM) / C * 1e12).toFixed(1)} ps</b>. The feeder skew from your SD cable is added on top of this and is normally far larger.`;
+  const skew = links.length > 1 ? (links[1].Ld - links[0].Ld) / C * 1e12 : 0;
+  $('skew').innerHTML = `Each antenna is aimed at the far-end main antenna. Reflections are sorted strongest first; up to 8 per link are kept. “Level vs direct ray” already includes the difference in antenna attenuation between the reflected and direct rays. Direct-path delay difference between the two receive antennas: <b>${skew.toFixed(1)} ps</b>; the feeder skew from your SD cable is added on top and is normally far larger.`;
   updateRippleCells();
 }
 function updateRippleCells() {
@@ -765,7 +849,7 @@ mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCo
 
 /* ---------- scenarios: save / restore ---------- */
 const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd',
-  'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo'];
+  'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo', 'dir', 'lblThr'];
 const SC_KEY = 'sdPlanner.scenarios.v1';
 function scLoadAll() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
 function scSaveAll(o) { try { localStorage.setItem(SC_KEY, JSON.stringify(o)); return true; } catch (e) { return false; } }
@@ -787,8 +871,10 @@ function scApply(sc) {
   if (!sc || !sc.values) { status('That scenario has no settings in it.', true); return; }
   stopScan();
   if (sc.values.cfmt) $('cfmt').value = sc.values.cfmt;
-  if (sc.values.combo === 'Am') sc.values.combo = 'B';
-  if (sc.values.combo === 'Ad') sc.values.combo = 'A';
+  { const c = sc.values.combo;           // older scenarios stored the receiving site in 'combo'
+    if (!sc.values.dir && (c === 'B' || c === 'Am')) sc.values.dir = 'AB';
+    if (!sc.values.dir && (c === 'A' || c === 'Ad')) sc.values.dir = 'BA';
+    if (c && c !== 'on' && c !== 'off') sc.values.combo = 'on'; }
   SC_FIELDS.forEach(id => { if (id !== 'cfmt' && sc.values[id] !== undefined) $(id).value = sc.values[id]; });
   const ph = Number.isFinite(sc.phase) ? sc.phase : 0;
   $('phase').value = ph; phiS = ph * rad; $('phaseVal').textContent = ph + '°';
@@ -862,6 +948,8 @@ $('btnLoad').addEventListener('click', () => loadTerrain(false));
 $('btnFlat').addEventListener('click', () => loadTerrain(true));
 $('phase').addEventListener('input', e => { phiS = +e.target.value * rad; $('phaseVal').textContent = e.target.value + '°'; drawSpectrum(); });
 $('combo').addEventListener('change', drawSpectrum);
+$('dir').addEventListener('change', compute);
+$('lblThr').addEventListener('change', drawProfile);
 $('btnNominal').addEventListener('click', () => { stopScan(); $('phase').value = 0; phiS = 0; $('phaseVal').textContent = '0°'; drawSpectrum(); });
 let scanning = false;
 function stopScan() { scanning = false; $('btnScan').textContent = 'Scan phase'; }
