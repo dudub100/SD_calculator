@@ -35,6 +35,7 @@ fieldset{border:0;border-bottom:1px solid var(--line);margin:0 0 12px;padding:0 
 fieldset:last-of-type{border-bottom:0}
 legend{font-weight:600;font-size:14px;padding:0;margin-bottom:8px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 label{display:flex;flex-direction:column;font-size:12.5px;color:var(--muted);gap:3px}
 input,select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);
   border-radius:6px;padding:5px 7px;width:100%;min-width:0}
@@ -117,14 +118,16 @@ label.chk input{width:auto}
     </div>
     <div class="hint" id="aHint"></div>
     <div class="ant">Main antenna</div>
-    <div class="row">
-      <label>Height above ground (m)<input id="aHm" type="number" step="0.5" value="30"></label>
-      <label>Dish diameter (m)<input id="aDm" type="number" step="0.1" value="1.8"></label>
+    <div class="row3">
+      <label>Height (m)<input id="aHm" type="number" step="0.5" value="30"></label>
+      <label>Dish (m)<input id="aDm" type="number" step="0.1" value="1.8"></label>
+      <label>Tilt (°)<input id="aTm" type="number" step="0.05" value="0" title="Elevation tilt from aiming at the far-end main antenna; positive is up"></label>
     </div>
     <div class="ant">Diversity antenna</div>
-    <div class="row">
-      <label>Height above ground (m)<input id="aHd" type="number" step="0.5" value="18"></label>
-      <label>Dish diameter (m)<input id="aDd" type="number" step="0.1" value="1.8"></label>
+    <div class="row3">
+      <label>Height (m)<input id="aHd" type="number" step="0.5" value="18"></label>
+      <label>Dish (m)<input id="aDd" type="number" step="0.1" value="1.8"></label>
+      <label>Tilt (°)<input id="aTd" type="number" step="0.05" value="0" title="Elevation tilt from aiming at the far-end main antenna; positive is up"></label>
     </div>
   </fieldset>
   <fieldset>
@@ -135,16 +138,19 @@ label.chk input{width:auto}
     </div>
     <div class="hint" id="bHint"></div>
     <div class="ant">Main antenna</div>
-    <div class="row">
-      <label>Height above ground (m)<input id="bHm" type="number" step="0.5" value="30"></label>
-      <label>Dish diameter (m)<input id="bDm" type="number" step="0.1" value="1.8"></label>
+    <div class="row3">
+      <label>Height (m)<input id="bHm" type="number" step="0.5" value="30"></label>
+      <label>Dish (m)<input id="bDm" type="number" step="0.1" value="1.8"></label>
+      <label>Tilt (°)<input id="bTm" type="number" step="0.05" value="0" title="Elevation tilt from aiming at the far-end main antenna; positive is up"></label>
     </div>
     <div class="ant">Diversity antenna</div>
-    <div class="row">
-      <label>Height above ground (m)<input id="bHd" type="number" step="0.5" value="18"></label>
-      <label>Dish diameter (m)<input id="bDd" type="number" step="0.1" value="1.8"></label>
+    <div class="row3">
+      <label>Height (m)<input id="bHd" type="number" step="0.5" value="18"></label>
+      <label>Dish (m)<input id="bDd" type="number" step="0.1" value="1.8"></label>
+      <label>Tilt (°)<input id="bTd" type="number" step="0.05" value="0" title="Elevation tilt from aiming at the far-end main antenna; positive is up"></label>
     </div>
   </fieldset>
+  <div class="hint" style="margin:-4px 0 12px">Tilt is relative to aiming at the far-end main antenna; positive is up.</div>
   <fieldset>
     <legend>Radio and propagation</legend>
     <div class="row">
@@ -268,7 +274,7 @@ label.chk input{width:auto}
       <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines.</li>
       <li>Reflection points are every place on the smoothed terrain where the reflection law holds (equal grazing angles to both antennas relative to the local slope) and both legs clear the unsmoothed terrain. All of them are kept, strongest first, and all are summed in the spectrum.</li>
       <li>Each point gets a divergence loss from the local surface curvature (earth bulge included), so convex hilltops and ridges spread the reflected energy and come out weaker than flat water or plains.</li>
-      <li>Every antenna is aimed at the far-end main antenna. Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
+      <li>Every antenna is aimed at the far-end main antenna and then tilted by its own tilt setting (positive is up). Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
       <li>Ground reflection is total (0 dB plus the optional extra loss) with a 180° phase reversal. Surface roughness is not included, so land reflections are a worst case; calm water is close to this assumption.</li>
       <li>Behaviour uses the delay × bandwidth product: below 0.05 the fade is flat across the channel, 0.05–0.3 gives a tilt or slope, and above 0.3 a notch can sit inside the band.</li>
     </ul>
@@ -443,8 +449,8 @@ function reformatCoords() {
 
 function params() {
   return {
-    A: { lat: parseCoord($('aLat').value, true), lon: parseCoord($('aLon').value, false), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd') },
-    B: { lat: parseCoord($('bLat').value, true), lon: parseCoord($('bLon').value, false), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd') },
+    A: { lat: parseCoord($('aLat').value, true), lon: parseCoord($('aLon').value, false), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd'), tm: num('aTm') || 0, td: num('aTd') || 0 },
+    B: { lat: parseCoord($('bLat').value, true), lon: parseCoord($('bLon').value, false), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd'), tm: num('bTm') || 0, td: num('bTd') || 0 },
     f: num('freq') * 1e9, bw: num('bw') * 1e6, rs: num('rs') * 1e6, k: num('kf'),
     rl: num('rloss') || 0, sm: Math.max(0, num('smooth') || 0), z: parseInt($('zoom').value, 10)
   };
@@ -572,6 +578,7 @@ function discrimination(D, lam, phi) {
   }
   return Math.max(0, Gmax - Math.min(G, Gmax));
 }
+const rotV = (v, deg) => { const c = Math.cos(deg * rad), s = Math.sin(deg * rad); return [v[0] * c - v[1] * s, v[0] * s + v[1] * c]; };
 const angBetween = (u, v) => Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])) / rad;
 
 /* ---------- core calculation ---------- */
@@ -585,8 +592,8 @@ function compute() {
   const yS = yT.map((_, i) => { const a = Math.max(0, i - hw), b = Math.min(N - 1, i + hw); return (pre[b + 1] - pre[a]) / (b - a + 1); });
 
   const ant = {
-    Am: { x: 0, y: elev[0] + p.A.hm, D: p.A.Dm }, Ad: { x: 0, y: elev[0] + p.A.hd, D: p.A.Dd },
-    Bm: { x: d, y: elev[N - 1] + p.B.hm, D: p.B.Dm }, Bd: { x: d, y: elev[N - 1] + p.B.hd, D: p.B.Dd },
+    Am: { x: 0, y: elev[0] + p.A.hm, D: p.A.Dm, tilt: p.A.tm }, Ad: { x: 0, y: elev[0] + p.A.hd, D: p.A.Dd, tilt: p.A.td },
+    Bm: { x: d, y: elev[N - 1] + p.B.hm, D: p.B.Dm, tilt: p.B.tm }, Bd: { x: d, y: elev[N - 1] + p.B.hd, D: p.B.Dd, tilt: p.B.td },
   };
 
   const visible = (ax, ay, px, py, c) => {   // ray antenna -> reflection point clears terrain
@@ -612,7 +619,7 @@ function compute() {
   const links = curLinks().map(L => {
     const a = ant[L.a], b = ant[L.b];
     const Ld = Math.hypot(b.x - a.x, b.y - a.y);
-    const aimA = [ant.Bm.x - a.x, ant.Bm.y - a.y], aimB = [ant.Am.x - b.x, ant.Am.y - b.y];
+    const aimA = rotV([ant.Bm.x - a.x, ant.Bm.y - a.y], a.tilt), aimB = rotV([ant.Am.x - b.x, ant.Am.y - b.y], -b.tilt);
     const offDirA = angBetween(aimA, [b.x - a.x, b.y - a.y]), offDirB = angBetween(aimB, [a.x - b.x, a.y - b.y]);
     const attDirA = discrimination(a.D, lam, offDirA), attDirB = discrimination(b.D, lam, offDirB);
     const discDir = attDirA + attDirB;
@@ -895,7 +902,7 @@ function drawTable() {
     }).join('');
   }).join('');
   const skew = links.length > 1 ? (links[1].Ld - links[0].Ld) / C * 1e12 : 0;
-  $('skew').innerHTML = `Each antenna is aimed at the far-end main antenna. Reflections are sorted strongest first; up to 8 per link are kept. “Level vs direct ray” already includes the difference in antenna attenuation between the reflected and direct rays. Direct-path delay difference between the two receive antennas: <b>${skew.toFixed(1)} ps</b>; the feeder skew from your SD cable is added on top and is normally far larger.`;
+  $('skew').innerHTML = `Each antenna is aimed at the far-end main antenna, then tilted by its tilt setting. Reflections are sorted strongest first; up to 8 per link are kept. “Level vs direct ray” already includes the difference in antenna attenuation between the reflected and direct rays. Direct-path delay difference between the two receive antennas: <b>${skew.toFixed(1)} ps</b>; the feeder skew from your SD cable is added on top and is normally far larger.`;
   updateRippleCells();
 }
 function updateRippleCells() {
@@ -939,7 +946,7 @@ mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCo
 
 
 /* ---------- scenarios: save / restore ---------- */
-const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd',
+const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd',
   'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo', 'dir', 'lblThr',
   'simM', 'simAlpha', 'simSnr', 'simN', 'simTaps', 'simNsm', 'simFeedLoss', 'simFade', 'simBoost', 'simPhase'];
 const SC_KEY = 'sdPlanner.scenarios.v1';
@@ -1034,7 +1041,7 @@ scRefreshList();
 });
 $('zoom').addEventListener('change', () => scheduleReload());
 $('cfmt').addEventListener('change', reformatCoords);
-['aHm', 'aDm', 'aHd', 'aDd', 'bHm', 'bDm', 'bHd', 'bDd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
+['aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
   .forEach(id => $(id).addEventListener('input', () => compute()));
 $('btnLoad').addEventListener('click', () => loadTerrain(false));
 $('btnFlat').addEventListener('click', () => loadTerrain(true));
@@ -1259,7 +1266,8 @@ function updateSimInfo() {
   $('simInfo').innerHTML = `Direction <b>${c.links[0].name.split(' → ')[0]} → ${c.rxB ? 'site B' : 'site A'}</b>, using the reflections from the geometry tab `
     + `(main antenna: ${rayTxt(c.links[0].refl.length, sm)}; diversity antenna: ${rayTxt(c.links[1].refl.length, sd)}). `
     + `Receive antenna separation <b>${c.sep.toFixed(1)} m</b>, so the diversity feeder delay is <b>${(c.sep * c.nsm).toFixed(1)} ns = ${(c.sep * c.nsm * 1e-9 / T).toFixed(2)} symbols</b>${c.comp ? ' (compensated)' : ''}. `
-    + `Diversity branch is ${(c.gainDiff + c.feedLoss).toFixed(1)} dB weaker (dish ${c.gainDiff.toFixed(1)} dB + feeder ${c.feedLoss.toFixed(1)} dB).`;
+    + `Diversity branch is ${(c.gainDiff + c.feedLoss).toFixed(1)} dB weaker (dish ${c.gainDiff.toFixed(1)} dB + feeder ${c.feedLoss.toFixed(1)} dB). `
+    + `Antenna loss on the direct rays from tilt: main ${(c.links[0].attDirA + c.links[0].attDirB).toFixed(1)} dB, diversity ${(c.links[1].attDirA + c.links[1].attDirB).toFixed(1)} dB.`;
 }
 function runSim() {
   if (!results) { $('simStatus').textContent = 'Calculate the geometry on the first tab first.'; return; }
@@ -1276,7 +1284,8 @@ function runSim() {
     return out;
   };
   const carrierDiv = -2 * Math.PI * c.p.f * dLd;
-  const branches = [rays(c.links[0], 0, 0, 0), rays(c.links[1], dLd + c.feeder, c.gainDiff + c.feedLoss, carrierDiv)];
+  const dirLoss = l => l.attDirA + l.attDirB;   // antenna loss on the direct ray, nonzero when antennas are tilted
+  const branches = [rays(c.links[0], 0, dirLoss(c.links[0]), 0), rays(c.links[1], dLd + c.feeder, c.gainDiff + c.feedLoss + dirLoss(c.links[1]), carrierDiv)];
   const cfg = { M: +$('simM').value, alpha: c.alpha, Rs: c.Rs, K: +$('simN').value, snrDb: +$('simSnr').value, L, seed: 1234, branches, skewS: dLd + c.feeder };
   $('simStatus').textContent = 'Running…'; $('btnSim').disabled = true;
   setTimeout(() => {
