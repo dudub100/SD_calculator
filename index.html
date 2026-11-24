@@ -84,6 +84,10 @@ td.cls{text-align:left;font-weight:500}
 .verdict{font-weight:600;font-size:15px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);margin-bottom:12px;border-left-width:5px}
 .verdict.good{border-left-color:var(--l1)} .verdict.fair{border-left-color:var(--l2)} .verdict.poor{border-left-color:var(--warn)} .verdict.na{border-left-color:var(--muted)}
 #sdPlot{height:360px}
+#mplot{height:150px;margin-top:8px}
+#peH{height:320px} #peHeat{height:320px}
+.atmrow[hidden]{display:none}
+textarea{font:13px/1.4 "IBM Plex Sans",system-ui,sans-serif;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:100%;min-height:90px;resize:vertical}
 .sdtext p{margin:0 0 8px;font-size:13.5px}
 nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
 nav.tabs button{background:transparent;color:var(--muted);border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;padding:8px 14px;font-weight:500}
@@ -174,6 +178,43 @@ label.chk input{width:auto}
       </select>
     </label>
   </fieldset>
+  <fieldset>
+    <legend>Atmosphere</legend>
+    <label>Model
+      <select id="atm">
+        <option value="k" selected>Straight rays, k-factor (fast)</option>
+        <option value="std">Ray tracing, standard (k-factor)</option>
+        <option value="super">Ray tracing, super-refractive layer</option>
+        <option value="evap">Ray tracing, evaporation duct</option>
+        <option value="surf">Ray tracing, surface-based duct</option>
+        <option value="elev">Ray tracing, elevated duct</option>
+        <option value="custom">Ray tracing, custom M-profile</option>
+      </select>
+    </label>
+    <div class="row atmrow" data-atm="super" style="margin-top:8px" hidden>
+      <label>Gradient in layer (N/km)<input id="atmSuperGrad" type="number" step="10" value="-120"></label>
+      <label>Layer top (m above sea)<input id="atmSuperTop" type="number" step="10" value="300"></label>
+    </div>
+    <div class="row atmrow" data-atm="evap" style="margin-top:8px" hidden>
+      <label>Duct height (m)<input id="atmEvapH" type="number" step="1" value="15"></label>
+    </div>
+    <div class="row3 atmrow" data-atm="surf elev" style="margin-top:8px" hidden>
+      <label>Layer base (m)<input id="atmBase" type="number" step="5" value="60"></label>
+      <label>Thickness (m)<input id="atmThick" type="number" step="5" value="80"></label>
+      <label>M deficit<input id="atmDef" type="number" step="5" value="40"></label>
+    </div>
+    <div class="atmrow" data-atm="custom" style="margin-top:8px" hidden>
+      <label>Height (m above sea) and M, one pair per line
+        <textarea id="atmCustom">0 0
+50 5.9
+100 -20
+300 3.6
+1000 86</textarea>
+      </label>
+    </div>
+    <canvas id="mplot"></canvas>
+    <div class="hint" id="atmHint"></div>
+  </fieldset>
   <div class="btns">
     <button id="btnLoad">Load terrain and calculate</button>
     <button id="btnFlat" class="ghost">Use flat ground</button>
@@ -227,6 +268,9 @@ label.chk input{width:auto}
             <option value="-1">Off</option>
           </select>
         </label>
+        <label>Ray fan
+          <select id="showFan" style="width:auto"><option value="off">Hidden</option><option value="on">Shown (ray tracing)</option></select>
+        </label>
       </div>
       <canvas id="profile"></canvas>
       <div class="legend" id="profLegend"></div>
@@ -262,7 +306,7 @@ label.chk input{width:auto}
       <thead><tr>
         <th class="lk">Link</th><th class="lk">Ray</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
         <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at<br>Tx antenna (°)</th><th>Tx antenna vs<br>boresight (dB)</th>
-        <th>Off-axis at<br>Rx antenna (°)</th><th>Rx antenna vs<br>boresight (dB)</th><th>Divergence<br>loss (dB)</th><th>Level vs<br>direct ray (dB)</th><th>Nominal<br>phase (°)</th>
+        <th>Off-axis at<br>Rx antenna (°)</th><th>Rx antenna vs<br>boresight (dB)</th><th>Divergence or<br>focusing loss (dB)</th><th>Level vs<br>direct ray (dB)</th><th>Nominal<br>phase (°)</th>
         <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
       </tr></thead>
       <tbody id="tbody"><tr><td class="lk" colspan="18" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
@@ -279,7 +323,7 @@ label.chk input{width:auto}
         <div id="sdText"></div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th class="lk">k-factor</th><th>Strongest reflection (dB)</th><th>Delay (ns)</th><th>Period (m)</th><th>Phase difference main vs div (°)</th><th class="lk">Separation</th></tr></thead>
+            <thead><tr><th class="lk" id="sdScanHead">k-factor</th><th>Strongest reflection (dB)</th><th>Delay (ns)</th><th>Period (m)</th><th>Phase difference main vs div (°)</th><th class="lk">Separation</th></tr></thead>
             <tbody id="sdKtab"></tbody>
           </table>
         </div>
@@ -291,11 +335,26 @@ label.chk input{width:auto}
     </div>
   </section>
 
+  <section class="panel" id="pePanel">
+    <h2>Full-wave check (parabolic equation)</h2>
+    <div class="btns" style="align-items:center">
+      <button id="btnPe">Verify with the full-wave model</button>
+      <span id="peStatus" class="summary" style="margin:0">Solves the wave equation for the current geometry and atmosphere at 13 frequencies across the channel.</span>
+    </div>
+    <div class="pair2" style="margin-top:12px">
+      <div><canvas id="peH"></canvas><div class="legend" id="peHLegend"></div></div>
+      <div><canvas id="peHeat"></canvas><div class="legend" id="peHeatLegend"></div></div>
+    </div>
+    <div class="summary" id="peSummary"></div>
+  </section>
+
   <section class="panel notes">
     <h2 style="color:var(--ink)">Method and assumptions</h2>
     <ul>
       <li>Terrain comes from AWS Terrarium elevation tiles (SRTM-based). If those cannot be read, the page falls back to the Open-Meteo elevation API, and then to flat ground.</li>
-      <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines.</li>
+      <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines. This is the “straight rays” atmosphere model.</li>
+      <li>The ray-tracing models use a modified refractivity profile M(h) instead of a single k. A fan of several thousand rays is bent by the local M gradient, reflected off the smoothed terrain and sea, and every ray reaching each receive antenna is found. Each ray gets its group delay (including the refractive index along it), departure and arrival angles (for the antenna patterns) and its focusing or spreading from neighbouring rays. Ray fragments with the same delay are merged with their energy added.</li>
+      <li>The full-wave check solves the parabolic wave equation (split-step Fourier) at 13 frequencies across the channel, with Gaussian apertures matched to the dish main lobes, an exactly reflecting sea surface and absorbing land. It captures diffraction and duct modes that ray tracing approximates, but only propagation angles up to about 2°, so steep reflections close to a site are not included.</li>
       <li>Reflection points are every place on the smoothed terrain where the reflection law holds (equal grazing angles to both antennas relative to the local slope) and both legs clear the unsmoothed terrain. All of them are kept, strongest first, and all are summed in the spectrum.</li>
       <li>Each point gets a divergence loss from the local surface curvature (earth bulge included), so convex hilltops and ridges spread the reflected energy and come out weaker than flat water or plains.</li>
       <li>Every antenna is aimed at the far-end main antenna and then tilted by its own tilt setting (positive is up). Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
@@ -328,6 +387,9 @@ label.chk input{width:auto}
         <label>Direct-ray fade (dB)<input id="simFade" type="number" step="1" value="0"></label>
         <label>Reflection boost (dB)<input id="simBoost" type="number" step="1" value="0"></label>
         <label>Extra reflection phase (°)<input id="simPhase" type="number" step="5" value="0"></label>
+        <label>Channel model
+          <select id="simChan"><option value="ray" selected>Rays from the geometry tab</option><option value="pe">Full-wave result</option></select>
+        </label>
         <label class="chk"><input id="simComp" type="checkbox"> Compensate feeder delay</label>
       </div>
       <div class="btns" style="margin-top:12px;align-items:center">
@@ -374,7 +436,9 @@ label.chk input{width:auto}
         <li>Complex white noise sets Es/N0 per branch for an unfaded main antenna, then each branch passes a matched root-raised-cosine filter.</li>
         <li>The equalizer is a fractionally spaced (T/2) linear MMSE filter with the chosen number of taps per branch. Its taps are solved from 2,000 known training symbols, and the cursor position is searched for the lowest error. In combined mode both branches are filtered and summed jointly, which is optimal diversity combining for a linear equalizer.</li>
         <li>Results are measured on the remaining symbols, after removing the MMSE bias.</li>
-        <li>“Direct-ray fade” and “Reflection boost” let you emulate ducting events, where the direct ray weakens or a reflection becomes stronger than the geometry predicts.</li>
+        <li>Channel model “Rays from the geometry tab” uses every ray from the selected atmosphere model: its level, delay and phase, the antenna patterns and tilts at both ends, and the focusing or spreading of the reference ray, so a duct that weakens the direct ray also lowers the SNR.</li>
+        <li>Channel model “Full-wave result” uses the frequency response from the parabolic-equation run instead, converted to a filter for each antenna. It includes diffraction and duct effects that rays only approximate.</li>
+        <li>“Direct-ray fade”, “Reflection boost” and “Extra reflection phase” apply to the ray channel only, to emulate events beyond the chosen atmosphere.</li>
       </ul>
     </section>
   </div>
@@ -471,12 +535,18 @@ function reformatCoords() {
   coordHints();
 }
 
+function readAtm() {
+  const custom = ($('atmCustom').value || '').split('\n').map(l => l.trim().split(/[\s,;]+/).map(Number)).filter(a => a.length >= 2 && a.every(Number.isFinite));
+  return { type: $('atm').value, superGrad: num('atmSuperGrad'), superTop: num('atmSuperTop'), evapH: num('atmEvapH'),
+    base: num('atmBase'), thick: num('atmThick'), def: num('atmDef'), custom };
+}
 function params() {
   return {
     A: { lat: parseCoord($('aLat').value, true), lon: parseCoord($('aLon').value, false), hm: num('aHm'), Dm: num('aDm'), hd: num('aHd'), Dd: num('aDd'), tm: num('aTm') || 0, td: num('aTd') || 0 },
     B: { lat: parseCoord($('bLat').value, true), lon: parseCoord($('bLon').value, false), hm: num('bHm'), Dm: num('bDm'), hd: num('bHd'), Dd: num('bDd'), tm: num('bTm') || 0, td: num('bTd') || 0 },
     f: num('freq') * 1e9, bw: num('bw') * 1e6, rs: num('rs') * 1e6, k: num('kf'),
-    rl: num('rloss') || 0, sm: Math.max(0, num('smooth') || 0), z: parseInt($('zoom').value, 10)
+    rl: num('rloss') || 0, sm: Math.max(0, num('smooth') || 0), z: parseInt($('zoom').value, 10),
+    atm: readAtm()
   };
 }
 function status(msg, err = false) { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
@@ -606,7 +676,7 @@ const rotV = (v, deg) => { const c = Math.cos(deg * rad), s = Math.sin(deg * rad
 const angBetween = (u, v) => Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])) / rad;
 
 /* ---------- core calculation ---------- */
-function geometry(p, fast) {
+function geometryK(p, fast) {
   const { d, N, xs, elev } = profile;
   const Re = p.k * 6371e3, lam = C / p.f, dx = d / (N - 1);
   const yT = xs.map((x, i) => elev[i] + x * (d - x) / (2 * Re));
@@ -702,10 +772,189 @@ function geometry(p, fast) {
   }
   return { p, d, N, xs, yT, yS, ant, links, lam, worstCl, worstX };
 }
+function geometry(p, fast) { return p.atm && p.atm.type !== 'k' ? rayGeometry(p, fast) : geometryK(p, fast); }
+/* ---------- atmosphere: modified refractivity profile M(z), z in m above sea level ---------- */
+function mProfile(p) {
+  const g = 0.157 / p.k, a = p.atm || { type: 'k' };
+  let Mf, desc;
+  switch (a.type) {
+    case 'super': { const gs = 0.157 + a.superGrad / 1000, t = a.superTop;
+      Mf = z => z < t ? gs * z : gs * t + g * (z - t); desc = `super-refractive layer to ${t} m, dN/dh ${a.superGrad} N/km`; break; }
+    case 'evap': { const dd = Math.max(a.evapH, 0.1), z0 = 1.5e-4;
+      Mf = z => { const zz = Math.max(z, 0); return g * zz - g * dd * Math.log((zz + z0) / z0); }; desc = `evaporation duct ${dd} m`; break; }
+    case 'surf': case 'elev': { const b = a.base, t = a.base + Math.max(a.thick, 1), Mb = g * b, Mt = Mb - a.def;
+      Mf = z => z < b ? g * z : z < t ? Mb - a.def * (z - b) / (t - b) : Mt + g * (z - t);
+      desc = `trapping layer ${b}–${t} m, M deficit ${a.def}`; break; }
+    case 'custom': { const tb = (a.custom || []).slice().sort((u, v) => u[0] - v[0]);
+      if (tb.length < 2) { Mf = z => g * z; desc = 'custom (needs at least two points; using standard)'; break; }
+      Mf = z => {
+        if (z <= tb[0][0]) return tb[0][1] + g * (z - tb[0][0]);
+        for (let i = 1; i < tb.length; i++) if (z <= tb[i][0]) { const [z0, m0] = tb[i - 1], [z1, m1] = tb[i]; return m0 + (m1 - m0) * (z - z0) / (z1 - z0); }
+        const [zl, ml] = tb[tb.length - 1]; return ml + g * (z - zl);
+      }; desc = `custom profile, ${tb.length} points`; break; }
+    default: Mf = z => g * z; desc = `standard, k = ${(+p.k).toFixed(2)}`;
+  }
+  return { Mf, g, desc };
+}
+function mTable(prof, zLo, zHi, dzT) {
+  const n = Math.ceil((zHi - zLo) / dzT) + 3, M = new Float64Array(n), G = new Float64Array(n);
+  for (let i = 0; i < n; i++) M[i] = prof.Mf(zLo + i * dzT);
+  for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); G[i] = (M[b] - M[a]) / ((b - a) * dzT); }
+  return { zLo, dzT, n, M, G, g: prof.g,
+    at(arr, z) { let u = (z - zLo) / dzT; if (u <= 0) return arr[0] + (arr === M ? prof.g * (z - zLo) : 0); if (u >= n - 1) return arr[n - 1] + (arr === M ? prof.g * (z - zLo - (n - 1) * dzT) : 0); const i = u | 0, f = u - i; return arr[i] * (1 - f) + arr[i + 1] * f; } };
+}
+/* trace geometry in the "traced frame": transmitter at x = 0, receivers at x = D; terrain raw (flat-earth M frame) */
+function traceFrame(p, tx) {
+  const { d, N, xs, elev } = profile;
+  const rev = tx === 'B';
+  const terAt = x => { const xx = rev ? d - x : x, u = Math.max(0, Math.min(N - 1, xx / d * (N - 1))), i = Math.min(N - 2, u | 0), f = u - i; return elev[i] * (1 - f) + elev[i + 1] * f; };
+  return { D: d, rev, terAt };
+}
+function rayTrace(p, fast) {
+  const { d, N, xs, elev } = profile, lam = C / p.f;
+  const links0 = curLinks(), tx = links0[0].tx;
+  const fr = traceFrame(p, tx), D = fr.D;
+  const nx = Math.max(200, Math.round(D / (fast ? 20 : 10))), dx = D / nx;
+  const ter = new Float64Array(nx + 1); for (let i = 0; i <= nx; i++) ter[i] = fr.terAt(i * dx);
+  // smoothed terrain slope for reflections
+  const hw = Math.max(1, Math.round(p.sm / dx / 2)), pre = [0]; for (let i = 0; i <= nx; i++) pre.push(pre[i] + ter[i]);
+  const ts = new Float64Array(nx + 1); for (let i = 0; i <= nx; i++) { const a = Math.max(0, i - hw), b = Math.min(nx, i + hw); ts[i] = (pre[b + 1] - pre[a]) / (b - a + 1); }
+  const slp = new Float64Array(nx + 1); for (let i = 0; i <= nx; i++) { const a = Math.max(0, i - 1), b = Math.min(nx, i + 1); slp[i] = (ts[b] - ts[a]) / ((b - a) * dx); }
+  // antenna heights ASL
+  const sA = p.A, sB = p.B, gA = elev[0], gB = elev[N - 1];
+  const txS = tx === 'A' ? sA : sB, rxS = tx === 'A' ? sB : sA, gTx = tx === 'A' ? gA : gB, gRx = tx === 'A' ? gB : gA;
+  const zT = gTx + txS.hm, zRm = gRx + rxS.hm, zRd = gRx + rxS.hd;
+  const prof = mProfile(p);
+  let tmin = Infinity; for (const v of ter) tmin = Math.min(tmin, v);
+  const tab = mTable(prof, Math.min(tmin, 0) - 20, Math.max(zT, zRm, zRd) + 3000, 0.25);
+  const Mref = tab.at(tab.M, zT);
+  // standard-alignment boresights (background gradient), plus tilts
+  const g6 = tab.g * 1e-6;
+  const thB = (zR) => (zR - zT) / D - g6 * D / 2;         // launch slope of background ray Tx main -> zR
+  const btx = thB(zRm) + txS.tm * rad;                    // Tx main boresight slope
+  const eRx = zR => -(thB(zR) + g6 * D);                  // Rx boresight elevation looking back
+  const eRm = eRx(zRm) + rxS.tm * rad, eRd = eRx(zRd) + rxS.td * rad;
+  // launch fan: fine region around line of sight, coarse region for steep near-Tx reflections
+  const s0 = (zRm - zT) / D;
+  const fineLo = s0 - 1.2 * rad, fineHi = s0 + 0.6 * rad, nf = fast ? 2000 : 5000, nc = fast ? 400 : 1200, coarseLo = -8 * rad;
+  const th0 = [];
+  for (let i = 0; i < nc; i++) th0.push(coarseLo + (fineLo - coarseLo) * i / nc);
+  for (let i = 0; i <= nf; i++) th0.push(fineLo + (fineHi - fineLo) * i / nf);
+  const nr = th0.length, maxB = 6;
+  const zE = new Float64Array(nr), tE = new Float64Array(nr), PE = new Float64Array(nr), bE = new Int32Array(nr), xb = new Float64Array(nr), gb = new Float64Array(nr), xA = new Float64Array(nr), alive = new Uint8Array(nr);
+  const fanEvery = Math.max(1, Math.round(nr / 70)), pathEvery = Math.max(1, Math.round(nx / 150)), fan = [];
+  const step = (th, keep) => {
+    let z = zT, t = th, P = 0, b = 0, x1 = -1, g1 = 0, zmax = z, xmax = 0; const path = keep ? [[0, z]] : null;
+    for (let i = 0; i < nx; i++) {
+      t += tab.at(tab.G, z) * 1e-6 * dx; z += t * dx;
+      P += (1 + (tab.at(tab.M, z) - Mref) * 1e-6) * dx * (1 + 0.5 * t * t);
+      const tt = ter[i + 1];
+      if (z < tt) { const al = slp[i + 1]; t = 2 * al - t; z = 2 * tt - z; b++; if (x1 < 0) { x1 = (i + 1) * dx; g1 = t - al; } if (b > maxB) return null; }
+      if (z > zmax) { zmax = z; xmax = (i + 1) * dx; }
+      if (keep && ((i + 1) % pathEvery === 0 || i === nx - 1)) path.push([(i + 1) * dx, z]);
+    }
+    return { z, t, P, b, x1, g1, xmax, zmax, path };
+  };
+  for (let r = 0; r < nr; r++) {
+    const res = step(th0[r], r % fanEvery === 0);
+    if (!res) continue;
+    alive[r] = 1; zE[r] = res.z; tE[r] = res.t; PE[r] = res.P; bE[r] = res.b; xb[r] = res.x1; gb[r] = res.g1; xA[r] = res.xmax;
+    if (res.path) fan.push(res.path);
+  }
+  // eigenrays for one receive height
+  const eig = zR => {
+    const out = [];
+    for (let r = 0; r < nr - 1; r++) {
+      if (!alive[r] || !alive[r + 1] || bE[r] !== bE[r + 1]) continue;
+      if (bE[r] > 0 && Math.abs(xb[r] - xb[r + 1]) > 1000) continue;
+      const a = zE[r] - zR, c = zE[r + 1] - zR; if (a * c > 0 || a === c) continue;
+      const f = a / (a - c), dth = th0[r + 1] - th0[r];
+      const dzdth = (zE[r + 1] - zE[r]) / dth;
+      let A = Math.sqrt(D / Math.abs(dzdth)), caustic = false; if (A > 3.16) { A = 3.16; caustic = true; }
+      out.push({ th0: th0[r] + f * dth, thE: tE[r] + f * (tE[r + 1] - tE[r]), P: PE[r] + f * (PE[r + 1] - PE[r]), b: bE[r],
+        x1: xb[r] + f * (xb[r + 1] - xb[r]), g1: gb[r] + f * (gb[r + 1] - gb[r]), xmax: xA[r] + f * (xA[r + 1] - xA[r]), A, caustic });
+    }
+    return out;
+  };
+  return { D, nx, dx, ter, tx, fr, zT, zRm, zRd, btx, eRm, eRd, tab, Mref, eig, step, fan, lam, prof };
+}
+// ray-model geometry with the same result structure as the straight-ray model
+function rayGeometry(p, fast) {
+  const { d, N, xs, elev } = profile, lam = C / p.f, ae = 6371e3;
+  const RT = rayTrace(p, fast), tx = RT.tx;
+  const bul = x => x * (d - x) / (2 * ae);
+  const toA = x => RT.fr.rev ? d - x : x;                         // traced x -> distance from A
+  const disp = (x, z) => [toA(x), z + bul(toA(x))];
+  const yT = xs.map((x, i) => elev[i] + bul(x));
+  const dxp = d / (N - 1), hwp = Math.max(1, Math.round(p.sm / dxp / 2)), pre = [0]; for (let i = 0; i < N; i++) pre.push(pre[i] + yT[i]);
+  const yS = yT.map((_, i) => { const a = Math.max(0, i - hwp), b = Math.min(N - 1, i + hwp); return (pre[b + 1] - pre[a]) / (b - a + 1); });
+  const ant = {
+    Am: { x: 0, y: elev[0] + p.A.hm, D: p.A.Dm, tilt: p.A.tm }, Ad: { x: 0, y: elev[0] + p.A.hd, D: p.A.Dd, tilt: p.A.td },
+    Bm: { x: d, y: elev[N - 1] + p.B.hm, D: p.B.Dm, tilt: p.B.tm }, Bd: { x: d, y: elev[N - 1] + p.B.hd, D: p.B.Dd, tilt: p.B.td },
+  };
+  const txS = tx === 'A' ? p.A : p.B, rxS = tx === 'A' ? p.B : p.A;
+  const llAt = xA => { const u = Math.max(0, Math.min(N - 1, xA / d * (N - 1))), i = Math.min(N - 2, u | 0), f = u - i, a = profile.pts[i], b = profile.pts[i + 1]; return { lat: a.lat + f * (b.lat - a.lat), lon: a.lon + f * (b.lon - a.lon) }; };
+  const pathOf = th => { const s = RT.step(th, true); return s ? s.path.map(([x, z]) => disp(x, z)) : []; };
+  const links = curLinks().map(L => {
+    const isDiv = (tx === 'A' ? L.b : L.a).endsWith('d');
+    const zR = isDiv ? RT.zRd : RT.zRm, eR = isDiv ? RT.eRd : RT.eRm, Drx = isDiv ? rxS.Dd : rxS.Dm, Dtx = txS.Dm;
+    // merge eigenrays that are fragments of the same path (same bounces, delay within 0.1 ns): power-sum their amplitudes
+    const raw = RT.eig(zR).sort((u, v) => u.P - v.P), rays = [];
+    for (const r of raw) {
+      const m = rays.find(q => q.b === r.b && Math.abs(q.P - r.P) < 0.03);
+      if (m) { if (r.A > m.A0) { const keepA = m.A; Object.assign(m, r, { A0: r.A }); m.A = keepA; } m.A = Math.min(3.16, Math.sqrt(m.A * m.A + r.A * r.A)); }
+      else rays.push({ ...r, A0: r.A });
+    }
+    const base = { ...L, refl: [], ok: false };
+    const offs = r => ({ offTx: Math.abs(r.th0 - RT.btx) / rad, offRx: Math.abs(-r.thE - eR) / rad });
+    const AB = (o) => tx === 'A' ? { A: o.offTx, B: o.offRx } : { A: o.offRx, B: o.offTx };
+    if (!rays.length) {
+      const o = { offTx: 0, offRx: 0 };
+      return { ...base, Ld: Math.hypot(d, ant[L.b].y - ant[L.a].y), offDirA: 0, offDirB: 0, attDirA: 0, attDirB: 0, dirDivDb: 60, noRay: true, refKind: 'No ray reaches this antenna', worst: 0, refPath: [] };
+    }
+    let ref = rays.find(r => r.b === 0) || rays[0];
+    const oR = offs(ref), aTx = discrimination(Dtx, lam, oR.offTx), aRx = discrimination(Drx, lam, oR.offRx), oAB = AB(oR);
+    const levelOf = r => { const o = offs(r); return 20 * Math.log10(r.A) - discrimination(Dtx, lam, o.offTx) - discrimination(Drx, lam, o.offRx) - r.b * p.rl; };
+    const refLvl = levelOf(ref);
+    let refl = [];
+    for (const r of rays) {
+      if (r === ref) continue;
+      const o = offs(r), oab = AB(o), at = discrimination(Dtx, lam, o.offTx), ar = discrimination(Drx, lam, o.offRx);
+      const rhoDb = refLvl - levelOf(r);
+      if (rhoDb > 45) continue;
+      const tau = (r.P - ref.P) / C;
+      const phase0 = ((((r.b - ref.b) * Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const xr = r.b > 0 ? r.x1 : r.xmax, xa = toA(xr);
+      const tz = RT.ter[Math.min(RT.nx, Math.round(xr / RT.dx))];
+      const kind = r.b === 0 ? 'refracted' : `${tz < 3 ? 'sea' : 'ground'} reflection${r.b > 1 ? ` ×${r.b}` : ''}`;
+      const yDisp = r.b > 0 ? tz + bul(xa) : null;
+      refl.push({ P: { x: xa, y: yDisp }, Lr: r.P, tau, graze: r.b > 0 ? Math.abs(r.g1) / rad : NaN, surface: kind, kind,
+        offRefA: oab.A, offRefB: oab.B, attA: tx === 'A' ? at : ar, attB: tx === 'A' ? ar : at,
+        sepA: (tx === 'A' ? Math.abs(r.th0 - ref.th0) : Math.abs(r.thE - ref.thE)) / rad,
+        sepB: (tx === 'A' ? Math.abs(r.thE - ref.thE) : Math.abs(r.th0 - ref.th0)) / rad,
+        disc: (at + ar) - (aTx + aRx), divDb: -20 * Math.log10(r.A), rhoDb, rho: 10 ** (-rhoDb / 20), phase0, caustic: r.caustic,
+        ...llAt(xa), th0: r.th0 });
+    }
+    refl.sort((u, v) => u.rhoDb - v.rhoDb); refl = refl.slice(0, 10);
+    for (const r of refl) { r.path = pathOf(r.th0); if (r.P.y === null) { let best = r.path[0]; for (const q of r.path) if (Math.abs(q[0] - r.P.x) < Math.abs(best[0] - r.P.x)) best = q; r.P.y = best[1]; } }
+    const out = { ...base, Ld: ref.P, refl, ok: refl.length > 0, offDirA: oAB.A, offDirB: oAB.B,
+      attDirA: tx === 'A' ? aTx : aRx, attDirB: tx === 'A' ? aRx : aTx, dirDivDb: -20 * Math.log10(ref.A),
+      refKind: ref.b === 0 ? 'Direct (refracted)' : 'Earliest ray (reflected)', refPath: pathOf(ref.th0), refCaustic: ref.caustic };
+    let worst = 0;
+    if (out.ok && !fast) for (let k = 0; k < 72; k++) { const rr = ripple(out, k * 5 * rad, p); worst = Math.max(worst, rr.max - rr.min); }
+    out.worst = worst;
+    return out;
+  });
+  // clearance shown for reference in the true-earth frame
+  let worstCl = Infinity, worstX = 0; const a = ant.Am, b = ant.Bm;
+  for (let i = 1; i < N - 1; i++) { const ly = a.y + (b.y - a.y) * xs[i] / d, F1 = Math.sqrt(lam * xs[i] * (d - xs[i]) / d), cl = (ly - yT[i]) / F1; if (cl < worstCl) { worstCl = cl; worstX = xs[i]; } }
+  return { p, d, N, xs, yT, yS, ant, links, lam, worstCl, worstX, mode: 'ray', fan: RT.fan.map(pth => pth.map(([x, z]) => disp(x, z))), atmDesc: RT.prof.desc };
+}
+
 function compute() {
   if (!profile) return;
   results = geometry(params(), false);
-  drawProfile(); drawTable(); drawSpectrum(); updateMapRefl(); drawSdCheck();
+  drawProfile(); drawTable(); drawSpectrum(); updateMapRefl(); drawSdCheck(); drawMplot(); if (typeof peMarkStale === 'function') peMarkStale();
 }
 
 function H2(l, f, phiS, p) { // |H|^2 at baseband offset f: direct ray plus every reflected ray
@@ -789,11 +1038,28 @@ function drawProfile() {
     g.stroke();
   }
   g.setLineDash([]);
+  const curved = results.mode === 'ray';
+  const drawPath = pts => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(Xm(x), Y(y)) : g.moveTo(Xm(x), Y(y))); g.stroke(); };
+  if (curved && $('showFan').value === 'on') {
+    g.save(); g.beginPath(); g.rect(box.l, box.t, box.r - box.l, box.b - box.t); g.clip();
+    g.strokeStyle = css('--muted'); g.globalAlpha = 0.35; g.lineWidth = 0.7; for (const pth of results.fan) drawPath(pth); g.globalAlpha = 1; g.restore();
+  }
   // direct paths
   g.strokeStyle = css('--direct');
-  for (const L of links) { const A = ant[L.a], B = ant[L.b]; g.lineWidth = L.key === 'MM' ? 1.6 : 0.9; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke(); }
+  for (const L of links) {
+    g.lineWidth = L.key === 'MM' ? 1.6 : 0.9;
+    if (curved) { if (L.refPath && L.refPath.length) drawPath(L.refPath); continue; }
+    const A = ant[L.a], B = ant[L.b]; g.beginPath(); g.moveTo(Xm(A.x), Y(A.y)); g.lineTo(Xm(B.x), Y(B.y)); g.stroke();
+  }
+  // traced rays (ray-tracing mode)
+  if (curved) for (const l of links) for (const r of l.refl) {
+    g.globalAlpha = Math.max(0.25, Math.min(1, 1 - r.rhoDb / 30)); g.strokeStyle = css(l.col); g.lineWidth = 1.6;
+    if (r.path) drawPath(r.path);
+    g.fillStyle = css(l.col); g.beginPath(); g.arc(Xm(r.P.x), Y(r.P.y), 4, 0, 2 * Math.PI); g.fill();
+  }
+  g.globalAlpha = 1;
   // reflected rays (opacity follows reflected level)
-  for (const l of links) {
+  if (!curved) for (const l of links) {
     const A = ant[l.a], B = ant[l.b];
     for (const r of l.refl) {
       const alpha = Math.max(0.25, Math.min(1, 1 - r.rhoDb / 30));
@@ -820,10 +1086,36 @@ function drawProfile() {
     + `<span><i class="sw" style="background:${css('--direct')}"></i>Direct rays</span>`
     + `<span><i class="sw" style="background:${css('--fresnel')}"></i>1st Fresnel zone, main to main</span>`
     + `<span>Labels: off-axis angle / antenna level vs boresight at the Tx and Rx antennas</span>`;
-  $('profSummary').innerHTML = `Path <b>${(d / 1000).toFixed(2)} km</b>, terrain from ${profile.src}. Worst clearance of A main → B main is <b>${results.worstCl.toFixed(2)} × F1</b> at ${(results.worstX / 1000).toFixed(1)} km`
+  $('profSummary').innerHTML = (curved ? `Ray tracing in a ${results.atmDesc} atmosphere, drawn over the true earth (k = 1), so ray bending is shown as it happens. ` : '') + `Path <b>${(d / 1000).toFixed(2)} km</b>, terrain from ${profile.src}. Worst clearance of A main → B main is <b>${results.worstCl.toFixed(2)} × F1</b> at ${(results.worstX / 1000).toFixed(1)} km`
     + (results.worstCl < 0.6 ? ' (below the usual 0.6 × F1 criterion).' : '.');
 }
 
+
+
+/* ---------- atmosphere UI ---------- */
+function atmUi() {
+  const t = $('atm').value;
+  document.querySelectorAll('.atmrow').forEach(el => el.hidden = !el.dataset.atm.split(' ').includes(t));
+  return t;
+}
+function drawMplot() {
+  const cv = $('mplot'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
+  const p = params(), prof = mProfile(p);
+  const zA = profile ? profile.elev[0] : 0, zB = profile ? profile.elev[profile.N - 1] : 0;
+  const ants = [zA + p.A.hm, zA + p.A.hd, zB + p.B.hm, zB + p.B.hd];
+  const a = p.atm, top = Math.max(...ants, a.type === 'surf' || a.type === 'elev' ? a.base + a.thick : 0, a.type === 'super' ? a.superTop : 0, a.type === 'evap' ? a.evapH * 3 : 0) * 1.3 + 20;
+  const zs = [...Array(121)].map((_, i) => top * i / 120), Ms = zs.map(z => prof.Mf(z));
+  const m0 = Math.min(...Ms), m1 = Math.max(...Ms) + 1e-6;
+  const box = { l: 44, r: w - 6, t: 6, b: h - 26 };
+  const { X, Y } = axes(g, box, m0 - (m1 - m0) * 0.05, m1 + (m1 - m0) * 0.05, 0, top, 'M (M-units, relative)', 'm');
+  g.strokeStyle = css('--accent'); g.lineWidth = 2; g.beginPath(); zs.forEach((z, i) => i ? g.lineTo(X(Ms[i]), Y(z)) : g.moveTo(X(Ms[i]), Y(z))); g.stroke();
+  g.strokeStyle = css('--ink'); g.lineWidth = 1; g.setLineDash([3, 3]);
+  for (const z of ants) { g.beginPath(); g.moveTo(box.l, Y(z)); g.lineTo(box.r, Y(z)); g.stroke(); }
+  g.setLineDash([]);
+  let duct = false; for (let i = 1; i < Ms.length; i++) if (Ms[i] < Ms[i - 1] - 1e-9) duct = true;
+  $('atmHint').textContent = a.type === 'k' ? 'Straight rays with an effective earth radius of k × 6371 km. Choose a ray-tracing model to include ducts.'
+    : `${prof.desc}. ${duct ? 'Where M decreases with height the layer traps rays (a duct).' : 'No trapping layer.'} Dashed lines are the antenna heights. Heights are above sea level.`;
+}
 
 /* ---------- angle labels on the profile ---------- */
 function drawAngleLabels(g, box, Xm, Y, links, ant, d) {
@@ -892,6 +1184,20 @@ function sdAnalyse(res) {
 }
 const sdQuality = dphi => { const a = Math.abs(dphi) / rad; return a >= 135 ? 'good' : a >= 72 ? 'fair' : 'poor'; };
 const sdWord = { good: 'Good', fair: 'Fair', poor: 'Poor' };
+let sdScanWanted = false;
+function sdScanDef(p) {
+  const a = p.atm || { type: 'k' }, kfmt = k => k >= 1000 ? '∞ (flat)' : Math.abs(k - 4 / 3) < 1e-9 ? '4/3' : String(k);
+  const withAtm = (key) => (pp, v) => ({ ...pp, atm: { ...pp.atm, [key]: v } });
+  switch (a.type) {
+    case 'super': return { label: 'Layer gradient (N/km)', values: [-80, -120, -157, -200, -300], apply: withAtm('superGrad'), fmt: String, isCurrent: (pp, v) => pp.atm.superGrad === v, manual: true };
+    case 'evap': return { label: 'Evaporation duct height (m)', values: [5, 10, 15, 20, 30, 40], apply: withAtm('evapH'), fmt: String, isCurrent: (pp, v) => pp.atm.evapH === v, manual: true };
+    case 'surf': return { label: 'Duct M deficit', values: [10, 20, 30, 40, 60, 80], apply: withAtm('def'), fmt: String, isCurrent: (pp, v) => pp.atm.def === v, manual: true };
+    case 'elev': return { label: 'Duct base height (m)', values: [50, 100, 150, 200, 300, 400], apply: withAtm('base'), fmt: String, isCurrent: (pp, v) => pp.atm.base === v, manual: true };
+    case 'custom': return { label: 'k-factor of the background', values: [0.67, 1, 4 / 3, 2, 4], apply: (pp, v) => ({ ...pp, k: v }), fmt: kfmt, isCurrent: (pp, v) => Math.abs(pp.k - v) < 1e-6, manual: true };
+    case 'std': return { label: 'k-factor', values: [0.67, 1, 4 / 3, 2, 4, 10, 1000], apply: (pp, v) => ({ ...pp, k: v }), fmt: kfmt, isCurrent: (pp, v) => Math.abs(pp.k - v) < 1e-6, manual: true };
+    default: return { label: 'k-factor', values: [0.67, 1, 4 / 3, 2, 4, 10, 1000], apply: (pp, v) => ({ ...pp, k: v }), fmt: kfmt, isCurrent: (pp, v) => Math.abs(pp.k - v) < 1e-6, manual: false };
+  }
+}
 function drawSdCheck() {
   if (!results) return;
   const A = sdAnalyse(results), siteName = A.rxIsB ? 'B' : 'A';
@@ -919,15 +1225,18 @@ function drawSdCheck() {
   txt.innerHTML = `<p>Strongest reflection at site ${siteName}: ${A.level.toFixed(1)} dB at ${(A.rm.P.x / 1000).toFixed(2)} km from A, arriving about ${A.sepDeg.toFixed(3)}° away from the direct ray. Moving an antenna up or down by one period, about λ / sin(${A.sepDeg.toFixed(3)}°) = <b>${A.period.toFixed(2)} m</b> here, takes it through one full cycle of the interference pattern.</p>`
     + `<p>The optimum separation puts the diversity antenna half a period away, or any odd multiple: ${opts.map(o => o.toFixed(2) + ' m').join(', ')}. Your separation is <b>${A.S.toFixed(2)} m</b>, giving a phase difference of ${deg(Math.abs(A.dphi))} at the carrier (180° is ideal, 0° is worst).</p>`
     + `<p>Across the channel the phase difference changes to ${deg(Math.abs(A.dLo))} at the lower edge and ${deg(Math.abs(A.dHi))} at the upper edge, because the two antennas see slightly different echo delays.</p>`
-    + `<p>The pattern moves as refraction changes, so check the separation over the range of k below. Multipath fading usually happens with k above 4/3.</p>`;
-  // k scan
-  const ks = [0.67, 1, 4 / 3, 2, 4, 10, 1000];
-  $('sdKtab').innerHTML = ks.map(k => {
-    const r = sdAnalyse(geometry({ ...results.p, k }, true));
-    const kl = k >= 1000 ? '∞ (flat)' : k === 4 / 3 ? '4/3' : String(k);
+    + (results.mode === 'ray' ? `<p>The pattern moves as the atmosphere changes, so check the separation across the duct conditions in the scan below.</p>` : `<p>The pattern moves as refraction changes, so check the separation over the range of k below. Multipath fading usually happens with k above 4/3.</p>`);
+  // scan of k (straight rays) or of the duct's main parameter (ray tracing)
+  const sc = sdScanDef(results.p);
+  $('sdScanHead').textContent = sc.label;
+  if (sc.manual && !sdScanWanted) { $('sdKtab').innerHTML = `<tr><td class="lk" colspan="6"><button class="ghost" id="btnSdScan">Run the ${sc.label.toLowerCase()} scan</button> (takes a few seconds with ray tracing)</td></tr>`; $('btnSdScan').onclick = () => { sdScanWanted = true; drawSdCheck(); }; drawSdPlot(A); return; }
+  sdScanWanted = false;
+  $('sdKtab').innerHTML = sc.values.map(v => {
+    const r = sdAnalyse(geometry(sc.apply(results.p, v), true));
+    const k = v, kl = sc.fmt(v);
     if (r.none) return `<tr><td class="lk">${kl}</td><td colspan="4" style="text-align:left">No reflection reaches the receive antennas</td><td class="lk">—</td></tr>`;
     const qq = r.level < -20 ? 'Not critical' : sdWord[sdQuality(r.dphi)];
-    return `<tr${Math.abs(k - results.p.k) < 1e-6 ? ' style="font-weight:600"' : ''}><td class="lk">${kl}</td><td>${r.level.toFixed(1)}</td><td>${(r.rm.tau * 1e9).toFixed(2)}</td><td>${r.period.toFixed(2)}</td><td>${(Math.abs(r.dphi) / rad).toFixed(0)}</td><td class="lk">${qq}</td></tr>`;
+    return `<tr${sc.isCurrent(results.p, v) ? ' style="font-weight:600"' : ''}><td class="lk">${kl}</td><td>${r.level.toFixed(1)}</td><td>${(r.rm.tau * 1e9).toFixed(2)}</td><td>${r.period.toFixed(2)}</td><td>${(Math.abs(r.dphi) / rad).toFixed(0)}</td><td class="lk">${qq}</td></tr>`;
   }).join('');
   drawSdPlot(A);
 }
@@ -1025,16 +1334,16 @@ function drawTable() {
     const t = txrx(l, null);
     const n = 1 + Math.max(l.refl.length, 1);
     const direct = `<tr>
-      <td class="lk" rowspan="${n}">${sw}${l.name}</td><td class="lk">Direct</td><td>—</td><td>—</td><td>—</td>
+      <td class="lk" rowspan="${n}">${sw}${l.name}</td><td class="lk">${l.refKind || 'Direct'}${l.refCaustic ? ' (caustic)' : ''}</td><td>—</td><td>—</td><td>—</td>
       <td>0 (L = ${(l.Ld / 1000).toFixed(3)} km)</td><td>0</td><td>0</td>
       <td>${t.offTx.toFixed(3)}</td><td>${fmtAtt(t.attTx)}</td><td>${t.offRx.toFixed(3)}</td><td>${fmtAtt(t.attRx)}</td>
-      <td>—</td><td>0.0 (reference)</td><td>—</td><td>—</td>
+      <td>${l.dirDivDb !== undefined ? l.dirDivDb.toFixed(1) : '—'}</td><td>0.0 (reference)</td><td>—</td><td>—</td>
       <td rowspan="${n}" id="rip-${l.key}"></td><td rowspan="${n}" class="cls">${behaviour(l, p)}</td></tr>`;
     if (!l.ok) return direct + `<tr><td class="lk" colspan="15">No specular point with both legs clear of the terrain.</td></tr>`;
     return direct + l.refl.map((r, k) => {
       const q = txrx(l, r);
-      return `<tr><td class="lk">Reflection ${k + 1}</td>
-      <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${r.graze.toFixed(3)}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
+      return `<tr><td class="lk">${r.kind ? `Ray ${k + 1}${r.caustic ? ' (caustic)' : ''}` : `Reflection ${k + 1}`}</td>
+      <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${Number.isFinite(r.graze) ? r.graze.toFixed(3) : '—'}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
       <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td>
       <td>${q.offTx.toFixed(3)}</td><td>${fmtAtt(q.attTx)}</td><td>${q.offRx.toFixed(3)}</td><td>${fmtAtt(q.attRx)}</td>
       <td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
@@ -1042,7 +1351,7 @@ function drawTable() {
     }).join('');
   }).join('');
   const skew = links.length > 1 ? (links[1].Ld - links[0].Ld) / C * 1e12 : 0;
-  $('skew').innerHTML = `Each antenna is aimed at the far-end main antenna, then tilted by its tilt setting. Reflections are sorted strongest first; up to 8 per link are kept. “Level vs direct ray” already includes the difference in antenna attenuation between the reflected and direct rays. Direct-path delay difference between the two receive antennas: <b>${skew.toFixed(1)} ps</b>; the feeder skew from your SD cable is added on top and is normally far larger.`;
+  $('skew').innerHTML = (results.mode === 'ray' ? `Ray tracing: delays are relative to the earliest unreflected ray; the divergence column is the ray-tube spreading loss relative to free space (negative means focusing), and the direct row shows it for the reference ray. Each antenna is aligned for the standard atmosphere, then tilted. ` : '') + `Each antenna is aimed at the far-end main antenna, then tilted by its tilt setting. Reflections are sorted strongest first; up to 8 per link are kept. “Level vs direct ray” already includes the difference in antenna attenuation between the reflected and direct rays. Direct-path delay difference between the two receive antennas: <b>${skew.toFixed(1)} ps</b>; the feeder skew from your SD cable is added on top and is normally far larger.`;
   updateRippleCells();
 }
 function updateRippleCells() {
@@ -1080,6 +1389,8 @@ function updateMapRefl() {
   }
 }
 let reloadTimer = null;
+let computeTimer = null;
+function scheduleCompute() { clearTimeout(computeTimer); computeTimer = setTimeout(compute, results && results.mode === 'ray' ? 350 : 60); }
 function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => loadTerrain(false), 400); }
 mA.on('dragend', e => { const ll = e.target.getLatLng(); $('aLat').value = fmtCoord(ll.lat, true); $('aLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
 mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCoord(ll.lat, true); $('bLon').value = fmtCoord(ll.lng, false); coordHints(); scheduleReload(); });
@@ -1088,7 +1399,8 @@ mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCo
 /* ---------- scenarios: save / restore ---------- */
 const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd',
   'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo', 'dir', 'lblThr',
-  'simM', 'simAlpha', 'simSnr', 'simN', 'simTaps', 'simNsm', 'simFeedLoss', 'simFade', 'simBoost', 'simPhase'];
+  'simM', 'simAlpha', 'simSnr', 'simN', 'simTaps', 'simNsm', 'simFeedLoss', 'simFade', 'simBoost', 'simPhase',
+  'atm', 'atmSuperGrad', 'atmSuperTop', 'atmEvapH', 'atmBase', 'atmThick', 'atmDef', 'atmCustom', 'showFan', 'simChan'];
 const SC_KEY = 'sdPlanner.scenarios.v1';
 function scLoadAll() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
 function scSaveAll(o) { try { localStorage.setItem(SC_KEY, JSON.stringify(o)); return true; } catch (e) { return false; } }
@@ -1119,6 +1431,7 @@ function scApply(sc) {
   $('phase').value = ph; phiS = ph * rad; $('phaseVal').textContent = ph + '°';
   $('scName').value = sc.name || '';
   if (!coordHints()) { status('The scenario’s coordinates are not recognised. Check the fields marked in red.', true); return; }
+  atmUi(); drawMplot();
   const p = params(); updateMapSites(p);
   const t = sc.terrain;
   if (t && Array.isArray(t.elev) && t.elev.length === t.N && t.N > 1) {
@@ -1182,7 +1495,15 @@ scRefreshList();
 $('zoom').addEventListener('change', () => scheduleReload());
 $('cfmt').addEventListener('change', reformatCoords);
 ['aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
-  .forEach(id => $(id).addEventListener('input', () => compute()));
+  .forEach(id => $(id).addEventListener('input', scheduleCompute));
+['atmSuperGrad', 'atmSuperTop', 'atmEvapH', 'atmBase', 'atmThick', 'atmDef', 'atmCustom'].forEach(id => $(id).addEventListener('input', () => { drawMplot(); scheduleCompute(); }));
+$('atm').addEventListener('change', () => {
+  const t = atmUi();
+  if (t === 'surf') { $('atmBase').value = 60; $('atmThick').value = 80; $('atmDef').value = 40; }
+  if (t === 'elev') { $('atmBase').value = 150; $('atmThick').value = 50; $('atmDef').value = 30; }
+  drawMplot(); compute();
+});
+$('showFan').addEventListener('change', drawProfile);
 $('btnLoad').addEventListener('click', () => loadTerrain(false));
 $('btnFlat').addEventListener('click', () => loadTerrain(true));
 $('phase').addEventListener('input', e => { phiS = +e.target.value * rad; $('phaseVal').textContent = e.target.value + '°'; drawSpectrum(); });
@@ -1202,10 +1523,11 @@ $('btnScan').addEventListener('click', () => {
   };
   requestAnimationFrame(step);
 });
-window.addEventListener('resize', () => { if (results) { drawProfile(); drawSpectrum(); drawSdCheck(); } });
+window.addEventListener('resize', () => { drawMplot(); if (results) { drawProfile(); drawSpectrum(); drawSdCheck(); } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (results) { drawProfile(); drawSpectrum(); drawTable(); updateMapRefl(); } });
 
 coordHints();
+atmUi(); drawMplot();
 updateMapSites(params());
 loadTerrain(false);
 </script>
@@ -1302,9 +1624,26 @@ function channelFir(rays, fs, W) {
   }
   return [hr, hi];
 }
-/* cfg: {M, alpha, Rs, K, snrDb, L, seed, branches:[rays, rays], skewS (s, diversity extra delay used for cursor search)} */
+// FIR from a sampled frequency response {Hf: {f (offsets, Hz), re, im}, D (extra delay, s), g (gain)} by frequency sampling
+function firFromH(b, fs, W) {
+  const NF = 512, re = new Float64Array(NF), im = new Float64Array(NF), F = b.Hf.f, n = F.length;
+  for (let i = 0; i < NF; i++) {
+    const f = (i < NF / 2 ? i : i - NF) * fs / NF;
+    let hr, hi;
+    if (f <= F[0]) { hr = b.Hf.re[0]; hi = b.Hf.im[0]; }
+    else if (f >= F[n - 1]) { hr = b.Hf.re[n - 1]; hi = b.Hf.im[n - 1]; }
+    else { let j = 1; while (F[j] < f) j++; const t = (f - F[j - 1]) / (F[j] - F[j - 1]); hr = b.Hf.re[j - 1] * (1 - t) + b.Hf.re[j] * t; hi = b.Hf.im[j - 1] * (1 - t) + b.Hf.im[j] * t; }
+    const ph = -2 * Math.PI * f * (b.D || 0), c = Math.cos(ph), s = Math.sin(ph), g = b.g === undefined ? 1 : b.g;
+    re[i] = g * (hr * c - hi * s); im[i] = -g * (hr * s + hi * c);      // conjugate for the inverse transform
+  }
+  fftC(re, im);
+  const hr = new Float64Array(2 * W + 1), hi = new Float64Array(2 * W + 1);
+  for (let m = 0; m <= 2 * W; m++) { const k = ((m - W) % NF + NF) % NF, w = 0.5 + 0.5 * Math.cos(Math.PI * (m - W) / (W + 1)); hr[m] = w * re[k] / NF; hi[m] = -w * im[k] / NF; }
+  return [hr, hi];
+}
+/* cfg: {M, alpha, Rs, K, snrDb, L, seed, W, branches:[rays or Hf-branch, ...], skewS (s, diversity extra delay used for cursor search)} */
 function simCore(cfg) {
-  const { M, alpha, Rs, K, snrDb, L } = cfg, m = Math.round(Math.sqrt(M)), fs = 2 * Rs, W = 12;
+  const { M, alpha, Rs, K, snrDb, L } = cfg, m = Math.round(Math.sqrt(M)), fs = 2 * Rs, W = cfg.W || 12;
   const rng = mulberry32(cfg.seed || 1234);
   const scale = Math.sqrt(2 * (M - 1) / 3);
   const ar = new Float64Array(K), ai = new Float64Array(K);
@@ -1316,7 +1655,7 @@ function simCore(cfg) {
   const sigma = Math.sqrt(10 ** (-snrDb / 10) / 2);
   const gauss = () => { let u = 0; while (u === 0) u = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng()); };
   const rx = cfg.branches.map(rays => {
-    const [hr, hi] = channelFir(rays, fs, W);
+    const [hr, hi] = rays.Hf ? firFromH(rays, fs, W) : channelFir(rays, fs, W);
     const [rr, ri] = convC(sr, si, hr, hi);
     for (let n = 0; n < rr.length; n++) { rr[n] += sigma * gauss(); ri[n] += sigma * gauss(); }
     const [xr, xi] = convC(rr, ri, g, null);
@@ -1376,6 +1715,177 @@ function simCore(cfg) {
   return { res, spec, scale, m };
 }
 
+/* ---------- full-wave check: split-step Fourier parabolic equation ---------- */
+// Prepares the frame and the per-frequency solver. Returns { freqs, run(i) -> {Hm, Hd}, heat (after centre run) }
+function peSetup(p) {
+  const { d, N, elev } = profile;
+  const tx = curLinks()[0].tx, fr = traceFrame(p, tx), D = fr.D;
+  const txS = tx === 'A' ? p.A : p.B, rxS = tx === 'A' ? p.B : p.A;
+  const gTx = tx === 'A' ? elev[0] : elev[N - 1], gRx = tx === 'A' ? elev[N - 1] : elev[0];
+  const zT = gTx + txS.hm, zRm = gRx + rxS.hm, zRd = gRx + rxS.hd;
+  const prof = mProfile(p);
+  // domain
+  let tmin = Infinity, tmax = -Infinity;
+  const dxs = Math.min(50, D / 300), nxs = Math.ceil(D / dxs), dx = D / nxs;
+  const ter = new Float64Array(nxs + 1); for (let i = 0; i <= nxs; i++) { ter[i] = fr.terAt(i * dx); tmin = Math.min(tmin, ter[i]); tmax = Math.max(tmax, ter[i]); }
+  const a = p.atm || {}, ductTop = a.type === 'surf' || a.type === 'elev' ? a.base + a.thick : a.type === 'super' ? a.superTop : a.type === 'evap' ? a.evapH : 0;
+  // the conducting boundary sits at sea level when the path touches the sea; otherwise just below the lowest terrain (masked)
+  const seaPath = tmin <= 0.5;
+  const zBase = seaPath ? 0 : Math.floor(tmin) - 1;
+  const zTop = Math.max(zT, zRm, zRd, ductTop, tmax) + 300;
+  const thMax = 2 * rad;
+  const g6 = prof.g * 1e-6;
+  const thB = zR => (zR - zT) / D - g6 * D / 2;
+  const btx = thB(zRm) + txS.tm * rad;
+  const brm = (thB(zRm) + g6 * D) - rxS.tm * rad, brd = (thB(zRd) + g6 * D) - rxS.td * rad;   // matched arrival slopes
+  const wT = 0.309 * txS.Dm, wRm = 0.309 * rxS.Dm, wRd = 0.309 * rxS.Dd;
+  const bwHz = p.bw, nf = 13, freqs = [...Array(nf)].map((_, i) => p.f - bwHz / 2 + bwHz * i / (nf - 1));
+  const ctx = { D, dx, nxs, ter, seaPath, zBase, zTop, zT, zRm, zRd, btx, brm, brd, wT, wRm, wRd, prof, tx, freqs, thMax };
+  ctx.run = (fi, wantHeat) => peRun(ctx, freqs[fi], wantHeat);
+  return ctx;
+}
+function peRun(c, f, wantHeat) {
+  const k = 2 * Math.PI * f / C, lam = C / f;
+  const dz0 = lam / (2 * Math.sin(c.thMax)), H = (c.zTop - c.zBase) / 0.7;
+  let Nz = 1; while (Nz < H / dz0) Nz <<= 1;
+  const dz = H / Nz, M2 = 2 * Nz;
+  // refraction phase with absorber in the top 30 %
+  const Mref = c.prof.Mf(c.zT);
+  const rr = new Float64Array(Nz), ri = new Float64Array(Nz);
+  for (let j = 0; j < Nz; j++) {
+    const z = c.zBase + j * dz, ph = k * c.dx * (c.prof.Mf(z) - Mref) * 1e-6;
+    const ua = j / Nz, att = ua < 0.7 ? 1 : 0.5 + 0.5 * Math.cos(Math.PI * (ua - 0.7) / 0.3);
+    rr[j] = att * Math.cos(ph); ri[j] = att * Math.sin(ph);
+  }
+  // free-space diffraction phase for the odd-extended spectrum of length 2Nz
+  const dr = new Float64Array(M2), di = new Float64Array(M2);
+  for (let j = 0; j < M2; j++) { const jj = j <= Nz ? j : M2 - j, pz = Math.PI * jj / (Nz * dz), ph = -pz * pz * c.dx / (2 * k); dr[j] = Math.cos(ph) / M2; di[j] = Math.sin(ph) / M2; }
+  // source: Gaussian aperture, tilted to the Tx boresight
+  let ur = new Float64Array(Nz), ui = new Float64Array(Nz);
+  for (let j = 1; j < Nz; j++) { const z = c.zBase + j * dz, s = z - c.zT, A = Math.exp(-((s / c.wT) ** 2)), ph = k * c.btx * s; ur[j] = A * Math.cos(ph); ui[j] = A * Math.sin(ph); }
+  const er = new Float64Array(M2), ei = new Float64Array(M2);
+  const hx = wantHeat ? Math.max(1, Math.floor(c.nxs / 240)) : 0, zb = 160, heat = wantHeat ? [] : null;
+  const q0r = 0, q0i = -k * c.wT * c.wT / 2;
+  for (let s = 0; s < c.nxs; s++) {
+    er.fill(0); ei.fill(0);
+    for (let j = 1; j < Nz; j++) { er[j] = ur[j]; ei[j] = ui[j]; er[M2 - j] = -ur[j]; ei[M2 - j] = -ui[j]; }
+    fftC(er, ei);
+    for (let j = 0; j < M2; j++) { const a = er[j], b = ei[j]; er[j] = a * dr[j] - b * di[j]; ei[j] = a * di[j] + b * dr[j]; }
+    // inverse FFT via conjugation
+    for (let j = 0; j < M2; j++) ei[j] = -ei[j];
+    fftC(er, ei);
+    const tz = c.ter[s + 1], jm = c.seaPath && tz <= 0.5 ? 0 : Math.floor((tz - c.zBase) / dz);
+    for (let j = 0; j < Nz; j++) {
+      const a = er[j], b = -ei[j];
+      if (j === 0 || j <= jm) { ur[j] = 0; ui[j] = 0; continue; }
+      ur[j] = a * rr[j] - b * ri[j]; ui[j] = a * ri[j] + b * rr[j];
+    }
+    if (wantHeat && (s + 1) % hx === 0) {
+      const x = (s + 1) * c.dx, qr = q0r + x, qi = q0i;               // free-space Gaussian peak |sqrt(q0/q)|
+      const ref = Math.sqrt(Math.abs(q0i) / Math.hypot(qr, qi));
+      const col = new Float32Array(zb);
+      for (let b = 0; b < zb; b++) {
+        const z0 = c.zBase + (c.zTop - c.zBase) * b / zb, z1 = c.zBase + (c.zTop - c.zBase) * (b + 1) / zb;
+        let m = 0; for (let j = Math.max(1, Math.floor((z0 - c.zBase) / dz)); j <= Math.min(Nz - 1, Math.ceil((z1 - c.zBase) / dz)); j++) m = Math.max(m, ur[j] * ur[j] + ui[j] * ui[j]);
+        col[b] = 10 * Math.log10(Math.max(m, 1e-20) / (ref * ref));
+      }
+      heat.push({ x, col, ter: tz });
+    }
+  }
+  // receive: overlap with the Gaussian receive aperture, normalised by the free-space aligned value
+  const recv = (zR, w, beta) => {
+    let sr = 0, si = 0;
+    for (let j = 1; j < Nz; j++) { const s2 = c.zBase + j * dz - zR, A = Math.exp(-((s2 / w) ** 2)), ph = -k * beta * s2, cr = A * Math.cos(ph), ci = A * Math.sin(ph); sr += ur[j] * cr - ui[j] * ci; si += ur[j] * ci + ui[j] * cr; }
+    sr *= dz; si *= dz;
+    // reference: sqrt(q0/q) * sqrt(pi / (1/w^2 - i k /(2q))), q = q0 + D
+    const q = [c.D, q0i], q0 = [0, q0i];
+    const cdiv = (a, b) => { const m = b[0] * b[0] + b[1] * b[1]; return [(a[0] * b[0] + a[1] * b[1]) / m, (a[1] * b[0] - a[0] * b[1]) / m]; };
+    const csqrt = a => { const m = Math.hypot(a[0], a[1]), r = Math.sqrt((m + a[0]) / 2), i = Math.sign(a[1] || 1) * Math.sqrt(Math.max(0, (m - a[0]) / 2)); return [r, i]; };
+    const t1 = csqrt(cdiv(q0, q)), ikq = cdiv([0, k], [2 * q[0], 2 * q[1]]);
+    const t2 = csqrt(cdiv([Math.PI, 0], [1 / (w * w) - ikq[0], -ikq[1]]));
+    const ref = [t1[0] * t2[0] - t1[1] * t2[1], t1[0] * t2[1] + t1[1] * t2[0]];
+    const h = cdiv([sr, si], ref);
+    return { re: h[0], im: h[1] };
+  };
+  return { f, Hm: recv(c.zRm, c.wRm, c.brm), Hd: recv(c.zRd, c.wRd, c.brd), heat, Nz, dz };
+}
+
+let peRes = null, peBusy = false;
+function peKey() { const p = params(); return JSON.stringify({ p, dir: $('dir').value, src: profile && profile.src, d: profile && profile.d, a: profile && profile.elev[0], b: profile && profile.elev[profile.N - 1] }); }
+function peMarkStale() { if (peRes && !peBusy) { const fresh = peRes.key === peKey(); $('peStatus').textContent = fresh ? peRes.msg : 'The settings changed since the last full-wave run. Run it again to compare.'; } }
+const plasma = t => { const st = [[13, 8, 135], [106, 0, 168], [177, 42, 144], [225, 100, 98], [252, 166, 54], [240, 249, 33]]; t = Math.max(0, Math.min(1, t)) * (st.length - 1); const i = Math.min(st.length - 2, Math.floor(t)), f = t - i; return st[i].map((v, k) => Math.round(v + (st[i + 1][k] - v) * f)); };
+function runPeCheck() {
+  if (!results || !profile || peBusy) return;
+  const p = params(), key = peKey();
+  let ctx;
+  try { ctx = peSetup(p); } catch (e) { $('peStatus').textContent = 'Could not set up the full-wave model: ' + e.message; return; }
+  peBusy = true; $('btnPe').disabled = true;
+  const out = new Array(ctx.freqs.length); let i = 0; const t0 = performance.now();
+  const order = [6, 0, 12, 3, 9, 1, 2, 4, 5, 7, 8, 10, 11];
+  const stepOne = () => {
+    if (i >= order.length) {
+      peRes = { key, freqs: ctx.freqs, Hm: out.map(o => o.Hm), Hd: out.map(o => o.Hd), heat: out[6].heat, ctx, rx: out[6], linksAt: results.links, mode: results.mode, atmDesc: results.mode === 'ray' ? results.atmDesc : `straight rays, k = ${p.k}` };
+      peRes.msg = `Done in ${((performance.now() - t0) / 1000).toFixed(1)} s (grid ${out[6].Nz} heights × ${ctx.nxs} range steps, ${out[6].dz.toFixed(2)} m vertical spacing).`;
+      $('peStatus').textContent = peRes.msg; peBusy = false; $('btnPe').disabled = false; drawPe(); updateSimInfo(); return;
+    }
+    const fi = order[i];
+    $('peStatus').textContent = `Solving frequency ${i + 1} of ${order.length}…`;
+    setTimeout(() => {
+      try { out[fi] = ctx.run(fi, fi === 6); i++; stepOne(); }
+      catch (e) { $('peStatus').textContent = 'Full-wave run failed: ' + e.message; peBusy = false; $('btnPe').disabled = false; }
+    }, 15);
+  };
+  stepOne();
+}
+function drawPe() {
+  if (!peRes) return;
+  const p = params(), links = results.links;
+  // ---- frequency responses: full-wave vs current ray/straight model
+  { const cv = $('peH'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
+    const off = peRes.freqs.map(f => (f - p.f) / 1e6), dB = c => 10 * Math.log10(Math.max(c.re * c.re + c.im * c.im, 1e-12));
+    const pm = peRes.Hm.map(dB), pd = peRes.Hd.map(dB);
+    const model = l => off.map(fm => { const f = fm * 1e6; let re = 1, im = 0; for (const r of l.refl) { const th = r.phase0 - 2 * Math.PI * f * r.tau; re += r.rho * Math.cos(th); im += r.rho * Math.sin(th); } return 10 * Math.log10(Math.max(re * re + im * im, 1e-12)) - l.attDirA - l.attDirB - (l.dirDivDb || 0); });
+    const rm = model(peRes.linksAt[0]), rd = model(peRes.linksAt[1]);
+    const all = [...pm, ...pd, ...rm, ...rd].filter(Number.isFinite);
+    const y0 = Math.floor(Math.min(-10, ...all) / 5) * 5, y1 = Math.ceil(Math.max(5, ...all) / 5) * 5;
+    const box = { l: 56, r: w - 12, t: 12, b: h - 40 };
+    const { X, Y } = axes(g, box, off[0], off[off.length - 1], y0, y1, 'Offset from carrier (MHz)', 'Level vs free space (dB)');
+    const line = (vals, col, lw, dash) => { g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash); g.beginPath(); vals.forEach((v, i) => i ? g.lineTo(X(off[i]), Y(v)) : g.moveTo(X(off[i]), Y(v))); g.stroke(); g.setLineDash([]); };
+    line(rm, css(links[0].col), 1.2, [5, 4]); line(rd, css(links[1].col), 1.2, [5, 4]);
+    line(pm, css(links[0].col), 2.4, []); line(pd, css(links[1].col), 2.4, []);
+    for (const [vals, col] of [[pm, css(links[0].col)], [pd, css(links[1].col)]]) { g.fillStyle = col; vals.forEach((v, i) => { g.beginPath(); g.arc(X(off[i]), Y(v), 2.5, 0, 2 * Math.PI); g.fill(); }); }
+    $('peHLegend').innerHTML = `<span><i class="sw" style="background:${css(links[0].col)}"></i>Main antenna</span><span><i class="sw" style="background:${css(links[1].col)}"></i>Diversity antenna</span><span>Solid with dots: full-wave model · dashed: ${peRes.mode === 'ray' ? 'ray tracing' : 'straight-ray model'}</span>`;
+    const dm = pm.map((v, i) => v - rm[i]), dd = pd.map((v, i) => v - rd[i]);
+    const rms = a => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
+    const spread = a => Math.max(...a) - Math.min(...a);
+    $('peSummary').innerHTML = `Atmosphere: ${peRes.atmDesc}. Across the channel the full-wave level varies by <b>${spread(pm).toFixed(1)} dB</b> at the main antenna and <b>${spread(pd).toFixed(1)} dB</b> at the diversity antenna. `
+      + `The ${peRes.mode === 'ray' ? 'ray-tracing' : 'straight-ray'} model differs from it by ${rms(dm).toFixed(1)} dB rms (main) and ${rms(dd).toFixed(1)} dB rms (diversity). `
+      + (Math.max(rms(dm), rms(dd)) < 1.5 ? 'The two models agree well.' : 'The models disagree noticeably: diffraction, duct modes or near-caustic focusing that rays only approximate are likely important here, so trust the full-wave result. Steep reflections near a site (above about 2°) appear only in the ray model.');
+  }
+  // ---- field map at the carrier
+  { const cv = $('peHeat'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
+    const c = peRes.ctx, heat = peRes.heat, nb = heat[0].col.length, rev = c.tx === 'B';
+    const box = { l: 56, r: w - 12, t: 12, b: h - 40 };
+    const { X, Y } = axes(g, box, 0, c.D / 1000, c.zBase, c.zTop, 'Distance from A (km)', 'Height above sea (m)');
+    const img = document.createElement('canvas'); img.width = heat.length; img.height = nb;
+    const ig = img.getContext('2d'), id = ig.createImageData(heat.length, nb);
+    heat.forEach((col, xi) => { const xc = rev ? heat.length - 1 - xi : xi; for (let b = 0; b < nb; b++) { const [r, gg, bb] = plasma((col.col[b] + 40) / 50), o = ((nb - 1 - b) * heat.length + xc) * 4; id.data[o] = r; id.data[o + 1] = gg; id.data[o + 2] = bb; id.data[o + 3] = 255; } });
+    ig.putImageData(id, 0, 0);
+    g.imageSmoothingEnabled = true; g.drawImage(img, box.l, box.t, box.r - box.l, box.b - box.t);
+    // terrain
+    g.fillStyle = css('--terrain'); g.beginPath(); g.moveTo(box.l, box.b);
+    heat.forEach(col => { const xa = rev ? c.D - col.x : col.x; g.lineTo(X(xa / 1000), Y(Math.max(c.zBase, col.ter))); });
+    g.lineTo(rev ? box.l : box.r, box.b); g.closePath(); g.fill();
+    // antennas
+    const txX = rev ? c.D : 0, rxX = rev ? 0 : c.D;
+    g.fillStyle = '#ffffff'; g.strokeStyle = '#000000'; g.lineWidth = 1;
+    for (const [x, z] of [[txX, c.zT], [rxX, c.zRm], [rxX, c.zRd]]) { g.beginPath(); g.arc(X(x / 1000), Y(z), 4, 0, 2 * Math.PI); g.fill(); g.stroke(); }
+    $('peHeatLegend').innerHTML = `<span>Field strength at the carrier relative to the free-space beam: dark −40 dB → yellow +10 dB</span><span>White dots: Tx main, Rx main and Rx diversity</span>`;
+  }
+}
+$('btnPe').addEventListener('click', runPeCheck);
+window.addEventListener('resize', () => { if (peRes && !$('tabGeo').hidden) drawPe(); });
+
 /* ===== QAM simulation tab: UI ===== */
 const SIM_NEED = { 4: 13.5, 16: 20.5, 64: 26.5, 256: 32.5, 1024: 38.5 };   // uncoded BER 1e-6, Es/N0 dB
 let simRes = null;
@@ -1407,7 +1917,8 @@ function updateSimInfo() {
     + `(main antenna: ${rayTxt(c.links[0].refl.length, sm)}; diversity antenna: ${rayTxt(c.links[1].refl.length, sd)}). `
     + `Receive antenna separation <b>${c.sep.toFixed(1)} m</b>, so the diversity feeder delay is <b>${(c.sep * c.nsm).toFixed(1)} ns = ${(c.sep * c.nsm * 1e-9 / T).toFixed(2)} symbols</b>${c.comp ? ' (compensated)' : ''}. `
     + `Diversity branch is ${(c.gainDiff + c.feedLoss).toFixed(1)} dB weaker (dish ${c.gainDiff.toFixed(1)} dB + feeder ${c.feedLoss.toFixed(1)} dB). `
-    + `Antenna loss on the direct rays from tilt: main ${(c.links[0].attDirA + c.links[0].attDirB).toFixed(1)} dB, diversity ${(c.links[1].attDirA + c.links[1].attDirB).toFixed(1)} dB.`;
+    + `Reference-ray loss from antenna tilt${results.mode === 'ray' ? ' and atmospheric focusing' : ''}: main ${(c.links[0].attDirA + c.links[0].attDirB + (c.links[0].dirDivDb || 0)).toFixed(1)} dB, diversity ${(c.links[1].attDirA + c.links[1].attDirB + (c.links[1].dirDivDb || 0)).toFixed(1)} dB. `
+    + ($('simChan').value === 'pe' ? (peRes && peRes.key === peKey() ? 'Channel: <b>full-wave result</b> (direct-ray fade, reflection boost and extra phase are not applied).' : 'Channel: <b>full-wave result — not available for the current settings; run it on the geometry tab.</b>') : `Channel: <b>rays from the geometry tab</b> (${results.mode === 'ray' ? 'ray tracing, ' + results.atmDesc : 'straight rays'}).`);
 }
 function runSim() {
   if (!results) { $('simStatus').textContent = 'Calculate the geometry on the first tab first.'; return; }
@@ -1424,9 +1935,16 @@ function runSim() {
     return out;
   };
   const carrierDiv = -2 * Math.PI * c.p.f * dLd;
-  const dirLoss = l => l.attDirA + l.attDirB;   // antenna loss on the direct ray, nonzero when antennas are tilted
+  const dirLoss = l => l.attDirA + l.attDirB + (l.dirDivDb || 0);   // antenna loss (tilt) and focusing or spreading of the reference ray
   const branches = [rays(c.links[0], 0, dirLoss(c.links[0]), 0), rays(c.links[1], dLd + c.feeder, c.gainDiff + c.feedLoss + dirLoss(c.links[1]), carrierDiv)];
-  const cfg = { M: +$('simM').value, alpha: c.alpha, Rs: c.Rs, K: +$('simN').value, snrDb: +$('simSnr').value, L, seed: 1234, branches, skewS: dLd + c.feeder };
+  let cfg = { M: +$('simM').value, alpha: c.alpha, Rs: c.Rs, K: +$('simN').value, snrDb: +$('simSnr').value, L, seed: 1234, branches, skewS: dLd + c.feeder };
+  if ($('simChan').value === 'pe') {
+    if (!peRes || peRes.key !== peKey()) { $('simStatus').textContent = 'Run “Verify with the full-wave model” on the geometry tab first, for the current settings.'; return; }
+    const off = peRes.freqs.map(f => f - c.p.f);
+    const mk = (arr, D, gainDb) => ({ Hf: { f: off, re: arr.map(h => h.re), im: arr.map(h => h.im) }, D, g: 10 ** (-gainDb / 20) });
+    cfg = { ...cfg, W: 32, branches: [mk(peRes.Hm, 0, 0), mk(peRes.Hd, c.feeder, c.gainDiff + c.feedLoss)], skewS: c.feeder };
+    branches.splice(0, 2, cfg.branches[0], cfg.branches[1]);
+  }
   $('simStatus').textContent = 'Running…'; $('btnSim').disabled = true;
   setTimeout(() => {
     try {
@@ -1469,7 +1987,9 @@ function drawSim() {
       g.strokeStyle = col; g.lineWidth = 1; g.setLineDash([4, 4]); g.beginPath();
       for (let q = 0; q <= 300; q++) {
         const f = -cfg.Rs * (1 + cfg.alpha) / 2 + q / 300 * cfg.Rs * (1 + cfg.alpha);
-        let re = 0, im = 0; for (const r of branches[bi]) { const th = -2 * Math.PI * f * r.D; re += r.re * Math.cos(th) - r.im * Math.sin(th); im += r.re * Math.sin(th) + r.im * Math.cos(th); }
+        let re = 0, im = 0;
+        if (branches[bi].Hf) { const B = branches[bi], F = B.Hf.f; let j = 1; while (j < F.length - 1 && F[j] < f) j++; const t = Math.max(0, Math.min(1, (f - F[j - 1]) / (F[j] - F[j - 1]))); re = B.g * (B.Hf.re[j - 1] * (1 - t) + B.Hf.re[j] * t); im = B.g * (B.Hf.im[j - 1] * (1 - t) + B.Hf.im[j] * t); }
+        else for (const r of branches[bi]) { const th = -2 * Math.PI * f * r.D; re += r.re * Math.cos(th) - r.im * Math.sin(th); im += r.re * Math.sin(th) + r.im * Math.cos(th); }
         const v = 10 * Math.log10(Math.max(re * re + im * im, 1e-12)); q ? g.lineTo(X(f / 1e6), cy(v)) : g.moveTo(X(f / 1e6), cy(v));
       }
       g.stroke(); g.setLineDash([]);
@@ -1479,7 +1999,7 @@ function drawSim() {
     });
     g.restore();
     $('simSpecLegend').innerHTML = `<span><i class="sw" style="background:${css(links[0].col)}"></i>Main antenna received</span>`
-      + `<span><i class="sw" style="background:${css(links[1].col)}"></i>Diversity antenna received</span><span>Dashed: channel response from the rays</span><span>Shaded: occupied bandwidth (1 + α) × symbol rate</span>`;
+      + `<span><i class="sw" style="background:${css(links[1].col)}"></i>Diversity antenna received</span><span>Dashed: channel response used in the simulation</span><span>Shaded: occupied bandwidth (1 + α) × symbol rate</span>`;
   }
   // ---- constellation
   { const cv = $('simConst'); const { g, w, h } = setup_(cv); g.clearRect(0, 0, w, h);
@@ -1503,6 +2023,7 @@ function drawSim() {
 }
 const setup_ = cv => setup(cv);
 ['simAlpha', 'bw', 'simNsm', 'simComp', 'simFeedLoss'].forEach(id => $(id).addEventListener('input', updateSimInfo));
+$('simChan').addEventListener('change', updateSimInfo);
 $('simComp').addEventListener('change', updateSimInfo);
 $('btnSim').addEventListener('click', runSim);
 $('simView').addEventListener('change', drawSim);
