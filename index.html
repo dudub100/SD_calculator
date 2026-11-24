@@ -179,40 +179,17 @@ label.chk input{width:auto}
     </label>
   </fieldset>
   <fieldset>
-    <legend>Atmosphere</legend>
+    <legend>Atmosphere and ground</legend>
     <label>Model
       <select id="atm">
-        <option value="k" selected>Straight rays, k-factor (fast)</option>
-        <option value="std">Ray tracing, standard (k-factor)</option>
-        <option value="super">Ray tracing, super-refractive layer</option>
-        <option value="evap">Ray tracing, evaporation duct</option>
-        <option value="surf">Ray tracing, surface-based duct</option>
-        <option value="elev">Ray tracing, elevated duct</option>
-        <option value="custom">Ray tracing, custom M-profile</option>
+        <option value="k" selected>Normal atmosphere</option>
+        <option value="duct">Thin duct over the ground</option>
       </select>
     </label>
-    <div class="row atmrow" data-atm="super" style="margin-top:8px" hidden>
-      <label>Gradient in layer (N/km)<input id="atmSuperGrad" type="number" step="10" value="-120"></label>
-      <label>Layer top (m above sea)<input id="atmSuperTop" type="number" step="10" value="300"></label>
+    <div class="row" style="margin-top:8px">
+      <label>Ground roughness, rms (m)<input id="rough" type="number" step="0.05" min="0" value="0.2"></label>
+      <label class="atmrow" data-atm="duct" hidden>Duct traps rays below (°)<input id="ductAng" type="number" step="0.05" min="0" value="0.5"></label>
     </div>
-    <div class="row atmrow" data-atm="evap" style="margin-top:8px" hidden>
-      <label>Duct height (m)<input id="atmEvapH" type="number" step="1" value="15"></label>
-    </div>
-    <div class="row3 atmrow" data-atm="surf elev" style="margin-top:8px" hidden>
-      <label>Layer base (m)<input id="atmBase" type="number" step="5" value="60"></label>
-      <label>Thickness (m)<input id="atmThick" type="number" step="5" value="80"></label>
-      <label>M deficit<input id="atmDef" type="number" step="5" value="40"></label>
-    </div>
-    <div class="atmrow" data-atm="custom" style="margin-top:8px" hidden>
-      <label>Height (m above sea) and M, one pair per line
-        <textarea id="atmCustom">0 0
-50 5.9
-100 -20
-300 3.6
-1000 86</textarea>
-      </label>
-    </div>
-    <canvas id="mplot"></canvas>
     <div class="hint" id="atmHint"></div>
   </fieldset>
   <div class="btns">
@@ -268,9 +245,6 @@ label.chk input{width:auto}
             <option value="-1">Off</option>
           </select>
         </label>
-        <label>Ray fan
-          <select id="showFan" style="width:auto"><option value="off">Hidden</option><option value="on">Shown (ray tracing)</option></select>
-        </label>
       </div>
       <canvas id="profile"></canvas>
       <div class="legend" id="profLegend"></div>
@@ -306,10 +280,10 @@ label.chk input{width:auto}
       <thead><tr>
         <th class="lk">Link</th><th class="lk">Ray</th><th>Reflection point<br>from A (km)</th><th>Surface</th><th>Grazing<br>angle (°)</th><th>Path<br>difference (m)</th>
         <th>Delay<br>(ns)</th><th>Delay<br>(symbols)</th><th>Off-axis at<br>Tx antenna (°)</th><th>Tx antenna vs<br>boresight (dB)</th>
-        <th>Off-axis at<br>Rx antenna (°)</th><th>Rx antenna vs<br>boresight (dB)</th><th>Divergence or<br>focusing loss (dB)</th><th>Level vs<br>direct ray (dB)</th><th>Nominal<br>phase (°)</th>
+        <th>Off-axis at<br>Rx antenna (°)</th><th>Rx antenna vs<br>boresight (dB)</th><th>Divergence<br>loss (dB)</th><th>Roughness<br>loss (dB)</th><th>Level vs<br>direct ray (dB)</th><th>Nominal<br>phase (°)</th>
         <th>Notch<br>spacing (MHz)</th><th>In-band ripple now /<br>worst over scan (dB)</th><th>Behaviour</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td class="lk" colspan="18" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="lk" colspan="19" style="color:var(--muted)">No results yet. Load terrain to calculate.</td></tr></tbody>
     </table>
     </div>
     <div class="summary" id="skew"></div>
@@ -353,8 +327,8 @@ label.chk input{width:auto}
     <ul>
       <li>Terrain comes from AWS Terrarium elevation tiles (SRTM-based). If those cannot be read, the page falls back to the Open-Meteo elevation API, and then to flat ground.</li>
       <li>Earth curvature uses the effective radius k × 6371 km, added as a bulge to the terrain so all rays are straight lines. This is the “straight rays” atmosphere model.</li>
-      <li>The ray-tracing models use a modified refractivity profile M(h) instead of a single k. A fan of several thousand rays is bent by the local M gradient, reflected off the smoothed terrain and sea, and every ray reaching each receive antenna is found. Each ray gets its group delay (including the refractive index along it), departure and arrival angles (for the antenna patterns) and its focusing or spreading from neighbouring rays. Ray fragments with the same delay are merged with their energy added.</li>
-      <li>The full-wave check solves the parabolic wave equation (split-step Fourier) at 13 frequencies across the channel, with Gaussian apertures matched to the dish main lobes, an exactly reflecting sea surface and absorbing land. It captures diffraction and duct modes that ray tracing approximates, but only propagation angles up to about 2°, so steep reflections close to a site are not included.</li>
+      <li>Two atmosphere models. <b>Normal atmosphere</b>: standard refraction, and ground reflections lose energy to divergence (earth and terrain curvature) and to roughness. Roughness uses the larger of your rms value and the terrain’s own bumpiness within the smoothing window, with the Rayleigh/Ament factor exp(−2(2πσ·sin ψ/λ)²). <b>Thin duct over the ground</b>: low-angle rays (grazing below the angle you set) are turned back by the duct before reaching the rough ground, so they reflect like a perfect mirror with no roughness or divergence loss; steeper reflections are treated as normal.</li>
+      <li>The full-wave check solves the parabolic wave equation (split-step Fourier) at 13 frequencies across the channel, with Gaussian apertures matched to the dish main lobes. It treats the sea as a smooth mirror and land as absorbing, models the thin duct as a 20 m trapping layer, and covers propagation angles up to about 2°, so steep reflections close to a site are not included.</li>
       <li>Reflection points are every place on the smoothed terrain where the reflection law holds (equal grazing angles to both antennas relative to the local slope) and both legs clear the unsmoothed terrain. All of them are kept, strongest first, and all are summed in the spectrum.</li>
       <li>Each point gets a divergence loss from the local surface curvature (earth bulge included), so convex hilltops and ridges spread the reflected energy and come out weaker than flat water or plains.</li>
       <li>Every antenna is aimed at the far-end main antenna and then tilted by its own tilt setting (positive is up). Off-axis discrimination uses the ITU-R F.699 reference envelope, which is accurate in the main lobe but an upper bound for side lobes, so far-off-axis reflections may be weaker in practice.</li>
@@ -436,7 +410,7 @@ label.chk input{width:auto}
         <li>Complex white noise sets Es/N0 per branch for an unfaded main antenna, then each branch passes a matched root-raised-cosine filter.</li>
         <li>The equalizer is a fractionally spaced (T/2) linear MMSE filter with the chosen number of taps per branch. Its taps are solved from 2,000 known training symbols, and the cursor position is searched for the lowest error. In combined mode both branches are filtered and summed jointly, which is optimal diversity combining for a linear equalizer.</li>
         <li>Results are measured on the remaining symbols, after removing the MMSE bias.</li>
-        <li>Channel model “Rays from the geometry tab” uses every ray from the selected atmosphere model: its level, delay and phase, the antenna patterns and tilts at both ends, and the focusing or spreading of the reference ray, so a duct that weakens the direct ray also lowers the SNR.</li>
+        <li>Channel model “Rays from the geometry tab” uses every ray found there: its level (including divergence, roughness or duct-mirror behaviour), delay and phase, and the antenna patterns and tilts at both ends.</li>
         <li>Channel model “Full-wave result” uses the frequency response from the parabolic-equation run instead, converted to a filter for each antenna. It includes diffraction and duct effects that rays only approximate.</li>
         <li>“Direct-ray fade”, “Reflection boost” and “Extra reflection phase” apply to the ray channel only, to emulate events beyond the chosen atmosphere.</li>
       </ul>
@@ -536,9 +510,7 @@ function reformatCoords() {
 }
 
 function readAtm() {
-  const custom = ($('atmCustom').value || '').split('\n').map(l => l.trim().split(/[\s,;]+/).map(Number)).filter(a => a.length >= 2 && a.every(Number.isFinite));
-  return { type: $('atm').value, superGrad: num('atmSuperGrad'), superTop: num('atmSuperTop'), evapH: num('atmEvapH'),
-    base: num('atmBase'), thick: num('atmThick'), def: num('atmDef'), custom };
+  return { type: $('atm').value === 'duct' ? 'duct' : 'k', rough: Math.max(0, num('rough') || 0), ductAng: Math.max(0, num('ductAng') || 0) };
 }
 function params() {
   return {
@@ -739,15 +711,21 @@ function geometryK(p, fast) {
         const attA = discrimination(a.D, lam, offRefA), attB = discrimination(b.D, lam, offRefB);
         const disc = attA + attB - discDir;
         const kap = curvature(c), d1 = P.x - a.x, d2 = b.x - P.x;
-        const Dv = kap > 0 ? 1 / Math.sqrt(1 + 2 * d1 * d2 * kap / ((d1 + d2) * Math.sin(psi))) : 1;
+        // thin ground duct: low-angle rays turn back above the ground, so the reflection is a perfect mirror
+        const mirror = p.atm && p.atm.type === 'duct' && psi <= (p.atm.ductAng || 0) * rad;
+        const Dv = !mirror && kap > 0 ? 1 / Math.sqrt(1 + 2 * d1 * d2 * kap / ((d1 + d2) * Math.sin(psi))) : 1;
         const divDb = -20 * Math.log10(Dv);
-        const rhoDb = disc + divDb + p.rl + 20 * Math.log10(Lr / Ld);
+        // roughness: larger of the user value and the terrain's own bumpiness around the point (Rayleigh / Ament factor)
+        let ss = 0, cnt = 0; for (let j = Math.max(0, c - hw); j <= Math.min(N - 1, c + hw); j++) { const rr = yT[j] - yS[j]; ss += rr * rr; cnt++; }
+        const sigma = Math.max(p.atm ? p.atm.rough : 0, Math.sqrt(ss / cnt));
+        const roughDb = mirror ? 0 : Math.min(60, 17.37 * (2 * Math.PI * sigma * Math.sin(psi) / lam) ** 2);
+        const rhoDb = disc + divDb + roughDb + p.rl + 20 * Math.log10(Lr / Ld);
         const phase0 = (((Math.PI - 2 * Math.PI * p.f * tau) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
         const t2 = c === i ? t : t - 1;
         const ll = profile.pts[i], ll2 = profile.pts[i + 1];
-        pts.push({ i, t, c, P, Lr, tau, graze: psi / rad, offRefA, offRefB, attA, attB, disc,
+        pts.push({ i, t, c, P, Lr, tau, graze: psi / rad, offRefA, offRefB, attA, attB, disc, roughDb, sigma, mirror,
           sepA: angBetween([b.x - a.x, b.y - a.y], [P.x - a.x, P.y - a.y]), sepB: angBetween([a.x - b.x, a.y - b.y], [P.x - b.x, P.y - b.y]), divDb, rhoDb, rho: 10 ** (-rhoDb / 20), phase0,
-          surface: kap > 1.5 / Re ? 'convex' : (kap < -0.5 / Re ? 'concave' : 'flat'),
+          surface: mirror ? 'duct mirror' : kap > 1.5 / Re ? 'convex' : (kap < -0.5 / Re ? 'concave' : 'flat'),
           lat: ll.lat + t * (ll2.lat - ll.lat), lon: ll.lon + t * (ll2.lon - ll.lon) });
       }
     }
@@ -772,7 +750,7 @@ function geometryK(p, fast) {
   }
   return { p, d, N, xs, yT, yS, ant, links, lam, worstCl, worstX };
 }
-function geometry(p, fast) { return p.atm && p.atm.type !== 'k' ? rayGeometry(p, fast) : geometryK(p, fast); }
+function geometry(p, fast) { return geometryK(p, fast); }
 /* ---------- atmosphere: modified refractivity profile M(z), z in m above sea level ---------- */
 function mProfile(p) {
   const g = 0.157 / p.k, a = p.atm || { type: 'k' };
@@ -782,6 +760,8 @@ function mProfile(p) {
       Mf = z => z < t ? gs * z : gs * t + g * (z - t); desc = `super-refractive layer to ${t} m, dN/dh ${a.superGrad} N/km`; break; }
     case 'evap': { const dd = Math.max(a.evapH, 0.1), z0 = 1.5e-4;
       Mf = z => { const zz = Math.max(z, 0); return g * zz - g * dd * Math.log((zz + z0) / z0); }; desc = `evaporation duct ${dd} m`; break; }
+    case 'duct': { const th = Math.max(a.ductAng || 0, 0.01) * rad, t = 20, def = th * th / 2 * 1e6;
+      Mf = z => z < t ? -def * Math.max(z, 0) / t : -def + g * (z - t); desc = `thin ground duct (20 m) trapping rays below ${a.ductAng}°`; break; }
     case 'surf': case 'elev': { const b = a.base, t = a.base + Math.max(a.thick, 1), Mb = g * b, Mt = Mb - a.def;
       Mf = z => z < b ? g * z : z < t ? Mb - a.def * (z - b) / (t - b) : Mt + g * (z - t);
       desc = `trapping layer ${b}–${t} m, M deficit ${a.def}`; break; }
@@ -1040,7 +1020,7 @@ function drawProfile() {
   g.setLineDash([]);
   const curved = results.mode === 'ray';
   const drawPath = pts => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(Xm(x), Y(y)) : g.moveTo(Xm(x), Y(y))); g.stroke(); };
-  if (curved && $('showFan').value === 'on') {
+  if (curved && $('showFan') && $('showFan').value === 'on') {
     g.save(); g.beginPath(); g.rect(box.l, box.t, box.r - box.l, box.b - box.t); g.clip();
     g.strokeStyle = css('--muted'); g.globalAlpha = 0.35; g.lineWidth = 0.7; for (const pth of results.fan) drawPath(pth); g.globalAlpha = 1; g.restore();
   }
@@ -1099,22 +1079,11 @@ function atmUi() {
   return t;
 }
 function drawMplot() {
-  const cv = $('mplot'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
-  const p = params(), prof = mProfile(p);
-  const zA = profile ? profile.elev[0] : 0, zB = profile ? profile.elev[profile.N - 1] : 0;
-  const ants = [zA + p.A.hm, zA + p.A.hd, zB + p.B.hm, zB + p.B.hd];
-  const a = p.atm, top = Math.max(...ants, a.type === 'surf' || a.type === 'elev' ? a.base + a.thick : 0, a.type === 'super' ? a.superTop : 0, a.type === 'evap' ? a.evapH * 3 : 0) * 1.3 + 20;
-  const zs = [...Array(121)].map((_, i) => top * i / 120), Ms = zs.map(z => prof.Mf(z));
-  const m0 = Math.min(...Ms), m1 = Math.max(...Ms) + 1e-6;
-  const box = { l: 44, r: w - 6, t: 6, b: h - 26 };
-  const { X, Y } = axes(g, box, m0 - (m1 - m0) * 0.05, m1 + (m1 - m0) * 0.05, 0, top, 'M (M-units, relative)', 'm');
-  g.strokeStyle = css('--accent'); g.lineWidth = 2; g.beginPath(); zs.forEach((z, i) => i ? g.lineTo(X(Ms[i]), Y(z)) : g.moveTo(X(Ms[i]), Y(z))); g.stroke();
-  g.strokeStyle = css('--ink'); g.lineWidth = 1; g.setLineDash([3, 3]);
-  for (const z of ants) { g.beginPath(); g.moveTo(box.l, Y(z)); g.lineTo(box.r, Y(z)); g.stroke(); }
-  g.setLineDash([]);
-  let duct = false; for (let i = 1; i < Ms.length; i++) if (Ms[i] < Ms[i - 1] - 1e-9) duct = true;
-  $('atmHint').textContent = a.type === 'k' ? 'Straight rays with an effective earth radius of k × 6371 km. Choose a ray-tracing model to include ducts.'
-    : `${prof.desc}. ${duct ? 'Where M decreases with height the layer traps rays (a duct).' : 'No trapping layer.'} Dashed lines are the antenna heights. Heights are above sea level.`;
+  const a = readAtm(), f = num('freq') * 1e9, lam = C / f;
+  const crit = (2 * Math.PI * (a.rough || 1e-9) * Math.sin(0.5 * rad) / lam);
+  $('atmHint').textContent = a.type === 'duct'
+    ? `A thin duct (about 20 m) lies on the ground. Reflections with a grazing angle below ${a.ductAng}° are turned back before they reach the rough ground, so they act as a perfect mirror: no roughness or divergence loss. Steeper reflections reach the ground and are treated as in the normal atmosphere.`
+    : `Standard refraction (k-factor). Ground reflections lose energy to the earth’s curvature (divergence) and to roughness: the larger of ${a.rough} m and the terrain’s own bumpiness. At 0.5° grazing, ${a.rough} m roughness costs about ${Math.min(60, 17.37 * crit * crit).toFixed(1)} dB.`;
 }
 
 /* ---------- angle labels on the profile ---------- */
@@ -1337,16 +1306,16 @@ function drawTable() {
       <td class="lk" rowspan="${n}">${sw}${l.name}</td><td class="lk">${l.refKind || 'Direct'}${l.refCaustic ? ' (caustic)' : ''}</td><td>—</td><td>—</td><td>—</td>
       <td>0 (L = ${(l.Ld / 1000).toFixed(3)} km)</td><td>0</td><td>0</td>
       <td>${t.offTx.toFixed(3)}</td><td>${fmtAtt(t.attTx)}</td><td>${t.offRx.toFixed(3)}</td><td>${fmtAtt(t.attRx)}</td>
-      <td>${l.dirDivDb !== undefined ? l.dirDivDb.toFixed(1) : '—'}</td><td>0.0 (reference)</td><td>—</td><td>—</td>
+      <td>${l.dirDivDb !== undefined ? l.dirDivDb.toFixed(1) : '—'}</td><td>—</td><td>0.0 (reference)</td><td>—</td><td>—</td>
       <td rowspan="${n}" id="rip-${l.key}"></td><td rowspan="${n}" class="cls">${behaviour(l, p)}</td></tr>`;
-    if (!l.ok) return direct + `<tr><td class="lk" colspan="15">No specular point with both legs clear of the terrain.</td></tr>`;
+    if (!l.ok) return direct + `<tr><td class="lk" colspan="16">No specular point with both legs clear of the terrain.</td></tr>`;
     return direct + l.refl.map((r, k) => {
       const q = txrx(l, r);
       return `<tr><td class="lk">${r.kind ? `Ray ${k + 1}${r.caustic ? ' (caustic)' : ''}` : `Reflection ${k + 1}`}</td>
       <td>${(r.P.x / 1000).toFixed(2)}</td><td>${r.surface}</td><td>${Number.isFinite(r.graze) ? r.graze.toFixed(3) : '—'}</td><td>${(r.Lr - l.Ld).toFixed(3)}</td>
       <td>${(r.tau * 1e9).toFixed(3)}</td><td>${(r.tau / T).toFixed(3)}</td>
       <td>${q.offTx.toFixed(3)}</td><td>${fmtAtt(q.attTx)}</td><td>${q.offRx.toFixed(3)}</td><td>${fmtAtt(q.attRx)}</td>
-      <td>${r.divDb.toFixed(1)}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
+      <td>${r.divDb.toFixed(1)}</td><td>${r.roughDb !== undefined ? r.roughDb.toFixed(1) : '—'}</td><td>${(-r.rhoDb).toFixed(1)}</td><td>${(r.phase0 / rad).toFixed(0)}</td>
       <td>${(1 / r.tau / 1e6).toFixed(0)}</td></tr>`;
     }).join('');
   }).join('');
@@ -1400,7 +1369,7 @@ mB.on('dragend', e => { const ll = e.target.getLatLng(); $('bLat').value = fmtCo
 const SC_FIELDS = ['cfmt', 'aLat', 'aLon', 'aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bLat', 'bLon', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd',
   'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth', 'zoom', 'combo', 'dir', 'lblThr',
   'simM', 'simAlpha', 'simSnr', 'simN', 'simTaps', 'simNsm', 'simFeedLoss', 'simFade', 'simBoost', 'simPhase',
-  'atm', 'atmSuperGrad', 'atmSuperTop', 'atmEvapH', 'atmBase', 'atmThick', 'atmDef', 'atmCustom', 'showFan', 'simChan'];
+  'atm', 'rough', 'ductAng', 'simChan'];
 const SC_KEY = 'sdPlanner.scenarios.v1';
 function scLoadAll() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
 function scSaveAll(o) { try { localStorage.setItem(SC_KEY, JSON.stringify(o)); return true; } catch (e) { return false; } }
@@ -1431,6 +1400,7 @@ function scApply(sc) {
   $('phase').value = ph; phiS = ph * rad; $('phaseVal').textContent = ph + '°';
   $('scName').value = sc.name || '';
   if (!coordHints()) { status('The scenario’s coordinates are not recognised. Check the fields marked in red.', true); return; }
+  if (!['k', 'duct'].includes($('atm').value)) $('atm').value = ['surf', 'evap', 'elev'].includes(sc.values.atm) ? 'duct' : 'k';
   atmUi(); drawMplot();
   const p = params(); updateMapSites(p);
   const t = sc.terrain;
@@ -1496,14 +1466,8 @@ $('zoom').addEventListener('change', () => scheduleReload());
 $('cfmt').addEventListener('change', reformatCoords);
 ['aHm', 'aDm', 'aHd', 'aDd', 'aTm', 'aTd', 'bHm', 'bDm', 'bHd', 'bDd', 'bTm', 'bTd', 'freq', 'bw', 'rs', 'kf', 'rloss', 'smooth']
   .forEach(id => $(id).addEventListener('input', scheduleCompute));
-['atmSuperGrad', 'atmSuperTop', 'atmEvapH', 'atmBase', 'atmThick', 'atmDef', 'atmCustom'].forEach(id => $(id).addEventListener('input', () => { drawMplot(); scheduleCompute(); }));
-$('atm').addEventListener('change', () => {
-  const t = atmUi();
-  if (t === 'surf') { $('atmBase').value = 60; $('atmThick').value = 80; $('atmDef').value = 40; }
-  if (t === 'elev') { $('atmBase').value = 150; $('atmThick').value = 50; $('atmDef').value = 30; }
-  drawMplot(); compute();
-});
-$('showFan').addEventListener('change', drawProfile);
+['rough', 'ductAng'].forEach(id => $(id).addEventListener('input', () => { drawMplot(); scheduleCompute(); }));
+$('atm').addEventListener('change', () => { atmUi(); drawMplot(); compute(); });
 $('btnLoad').addEventListener('click', () => loadTerrain(false));
 $('btnFlat').addEventListener('click', () => loadTerrain(true));
 $('phase').addEventListener('input', e => { phiS = +e.target.value * rad; $('phaseVal').textContent = e.target.value + '°'; drawSpectrum(); });
@@ -1728,7 +1692,7 @@ function peSetup(p) {
   let tmin = Infinity, tmax = -Infinity;
   const dxs = Math.min(50, D / 300), nxs = Math.ceil(D / dxs), dx = D / nxs;
   const ter = new Float64Array(nxs + 1); for (let i = 0; i <= nxs; i++) { ter[i] = fr.terAt(i * dx); tmin = Math.min(tmin, ter[i]); tmax = Math.max(tmax, ter[i]); }
-  const a = p.atm || {}, ductTop = a.type === 'surf' || a.type === 'elev' ? a.base + a.thick : a.type === 'super' ? a.superTop : a.type === 'evap' ? a.evapH : 0;
+  const a = p.atm || {}, ductTop = a.type === 'duct' ? 20 : a.type === 'surf' || a.type === 'elev' ? a.base + a.thick : a.type === 'super' ? a.superTop : a.type === 'evap' ? a.evapH : 0;
   // the conducting boundary sits at sea level when the path touches the sea; otherwise just below the lowest terrain (masked)
   const seaPath = tmin <= 0.5;
   const zBase = seaPath ? 0 : Math.floor(tmin) - 1;
@@ -1824,7 +1788,7 @@ function runPeCheck() {
   const order = [6, 0, 12, 3, 9, 1, 2, 4, 5, 7, 8, 10, 11];
   const stepOne = () => {
     if (i >= order.length) {
-      peRes = { key, freqs: ctx.freqs, Hm: out.map(o => o.Hm), Hd: out.map(o => o.Hd), heat: out[6].heat, ctx, rx: out[6], linksAt: results.links, mode: results.mode, atmDesc: results.mode === 'ray' ? results.atmDesc : `straight rays, k = ${p.k}` };
+      peRes = { key, freqs: ctx.freqs, Hm: out.map(o => o.Hm), Hd: out.map(o => o.Hd), heat: out[6].heat, ctx, rx: out[6], linksAt: results.links, mode: results.mode, atmDesc: mProfile(p).desc };
       peRes.msg = `Done in ${((performance.now() - t0) / 1000).toFixed(1)} s (grid ${out[6].Nz} heights × ${ctx.nxs} range steps, ${out[6].dz.toFixed(2)} m vertical spacing).`;
       $('peStatus').textContent = peRes.msg; peBusy = false; $('btnPe').disabled = false; drawPe(); updateSimInfo(); return;
     }
@@ -1858,9 +1822,10 @@ function drawPe() {
     const dm = pm.map((v, i) => v - rm[i]), dd = pd.map((v, i) => v - rd[i]);
     const rms = a => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);
     const spread = a => Math.max(...a) - Math.min(...a);
-    $('peSummary').innerHTML = `Atmosphere: ${peRes.atmDesc}. Across the channel the full-wave level varies by <b>${spread(pm).toFixed(1)} dB</b> at the main antenna and <b>${spread(pd).toFixed(1)} dB</b> at the diversity antenna. `
+    $('peSummary').innerHTML = `Atmosphere: ${peRes.atmDesc}. The full-wave model treats the sea as a smooth mirror and land as absorbing; ground roughness is only in the geometry model, so expect it to show stronger sea reflections when you set a roughness.`
+      + ` Across the channel the full-wave level varies by <b>${spread(pm).toFixed(1)} dB</b> at the main antenna and <b>${spread(pd).toFixed(1)} dB</b> at the diversity antenna. `
       + `The ${peRes.mode === 'ray' ? 'ray-tracing' : 'straight-ray'} model differs from it by ${rms(dm).toFixed(1)} dB rms (main) and ${rms(dd).toFixed(1)} dB rms (diversity). `
-      + (Math.max(rms(dm), rms(dd)) < 1.5 ? 'The two models agree well.' : 'The models disagree noticeably: diffraction, duct modes or near-caustic focusing that rays only approximate are likely important here, so trust the full-wave result. Steep reflections near a site (above about 2°) appear only in the ray model.');
+      + (Math.max(rms(dm), rms(dd)) < 1.5 ? 'The two models agree well.' : 'The models disagree noticeably. If you set a ground roughness, part of this is the roughness the full-wave model ignores (set it to 0 to compare propagation alone); otherwise diffraction or duct effects matter here, so trust the full-wave result. Steep reflections near a site (above about 2°) appear only in the geometry model.');
   }
   // ---- field map at the carrier
   { const cv = $('peHeat'); const { g, w, h } = setup(cv); g.clearRect(0, 0, w, h);
